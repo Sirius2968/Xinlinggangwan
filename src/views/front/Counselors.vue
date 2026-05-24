@@ -210,20 +210,16 @@ const quickQuestions = [
             {{ msg.role === 'user' ? '👤' : '🤖' }}
           </div>
           <div class="msg-body">
-            <div class="msg-bubble">{{ msg.content }}</div>
+            <div class="msg-bubble" :class="{ typing: msg.role === 'assistant' && !msg.content }">
+              <template v-if="msg.content">{{ msg.content }}</template>
+              <template v-else>
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              </template>
+            </div>
             <span class="msg-time">{{ msg.time }}</span>
           </div>
         </div>
 
-        <!-- 加载动画 -->
-        <div v-if="loading" class="message-row msg-ai">
-          <div class="msg-avatar">🤖</div>
-          <div class="msg-body">
-            <div class="msg-bubble typing">
-              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- 底部输入区 -->

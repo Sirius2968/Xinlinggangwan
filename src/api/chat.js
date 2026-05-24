@@ -72,10 +72,31 @@ export function sendMessageStream(chatId, message, { onChunk, onDone, onError })
             if (jsonStr === '[DONE]') continue
             try {
               const parsed = JSON.parse(jsonStr)
-              // 常见的 SSE chunk 格式: { content: "增量文本" } 或 { delta: "..." } 或纯字符串
-              const chunk = parsed.content || parsed.delta || parsed.text || ''
-              if (chunk && typeof chunk === 'string') {
-                onChunk(chunk)
+              // 根据事件类型处理
+              if (parsed.type === 'content') {
+                // 增量内容
+                if (parsed.content && typeof parsed.content === 'string') {
+                  onChunk(parsed.content)
+                }
+              } else if (parsed.type === 'correction') {
+                // 修正内容（去重后的完整内容）
+                // 触发特殊回调或直接替换
+                if (typeof onCorrection === 'function' && parsed.content) {
+                  onCorrection(parsed.content)
+                }
+              } else if (parsed.type === 'done') {
+                // 完成信号
+                onDone?.(parsed.content)
+              } else if (parsed.type === 'error') {
+                // 错误信号
+                onError?.(parsed.error)
+                return
+              } else {
+                // 兼容其他格式
+                const chunk = parsed.content || parsed.delta || parsed.text || ''
+                if (chunk && typeof chunk === 'string') {
+                  onChunk(chunk)
+                }
               }
             } catch {
               // 非 JSON 行，可能是纯文本内容
