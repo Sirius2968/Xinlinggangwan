@@ -1,24 +1,63 @@
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
-import { createChat, sendMessageStream, getChatHistory } from '@/api/chat'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
+import { createChat, sendMessageStream, getChatHistory, listChats, deleteChat, renameChat, clearChatMessages } from '@/api/chat'
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
 
 // ============================================================
 // 对话列表（左侧边栏）
 // ============================================================
 const conversations = ref([])
 const activeId = ref(null)
+const openMenuId = ref(null)  // 当前打开的下拉菜单所属的对话 ID
 
+/** 切换下拉菜单 */
+function toggleMenu(convId) {
+  openMenuId.value = openMenuId.value === convId ? null : convId
+}
+
+/** 点击页面其他位置关闭菜单 */
+function closeMenu() {
+  openMenuId.value = null
+}
+
+/** 从数据库加载当前用户的对话列表 */
+async function loadChatList() {
+  if (!userStore.isLoggedIn) return
+  try {
+    const res = await listChats()
+    const list = res.data || res || []
+    if (Array.isArray(list) && list.length > 0) {
+      conversations.value = list.map((c) => ({
+        id: c.chat_id,
+        chatId: c.chat_id,
+        dbId: c.id,
+        title: c.title || '新对话',
+      }))
+      // 自动选中最近一个
+      activeId.value = conversations.value[0].chatId
+      await switchChat(conversations.value[0])
+    }
+  } catch {
+    // 加载失败，保持空列表
+  }
+}
+
+/** 从后端创建新对话并加入列表 */
 async function newChat() {
-  const localId = Date.now()
   try {
     const res = await createChat()
     const chatId = res.chat_id || res.data?.chat_id
-    conversations.value.unshift({ id: localId, chatId, title: '新对话' })
-    activeId.value = localId
+    const dbId = res.id || res.data?.id
+    conversations.value.unshift({ id: chatId, chatId, dbId, title: '新对话' })
+    activeId.value = chatId
     messages.value = []
     inputText.value = ''
   } catch (err) {
     console.error('createChat 失败:', err)
+    const localId = Date.now()
     conversations.value.unshift({ id: localId, chatId: null, title: '新对话(离线)' })
     activeId.value = localId
     messages.value = []
@@ -32,7 +71,15 @@ async function newChat() {
 const messages = ref([])
 const inputText = ref('')
 const loading = ref(false)
+const abortFn = ref(null)
 const chatArea = ref(null)
+
+/** 当前聊天区的显示模式：'empty' | 'prompt' | 'messages' */
+const displayMode = computed(() => {
+  if (conversations.value.length === 0 || !activeId.value) return 'empty'
+  if (messages.value.length === 0) return 'prompt'
+  return 'messages'
+})
 
 /**
  * 添加一条消息到列表
@@ -49,7 +96,10 @@ function addMessage(role, content) {
  * 切换对话时加载历史消息
  */
 async function switchChat(conv) {
+  openMenuId.value = null
   activeId.value = conv.id
+  // 立即清空，避免显示上一个对话的残留内容
+  messages.value = []
   if (conv.chatId) {
     try {
       const res = await getChatHistory(conv.chatId)
@@ -59,17 +109,133 @@ async function switchChat(conv) {
         content: m.content,
         time: m.time || '',
       }))
+      // 如果有本地草稿（上次未完成的对话），追加到历史后面
+      const draft = loadDraftFromLocal(conv.chatId)
+      if (draft && draft.length > 0) {
+        const lastHistoryMsg = messages.value[messages.value.length - 1]
+        if (lastHistoryMsg) {
+          const draftStart = draft.findIndex(
+            (m) => m.content === lastHistoryMsg.content && m.role === lastHistoryMsg.role,
+          )
+          if (draftStart >= 0) {
+            messages.value.push(...draft.slice(draftStart + 1))
+          }
+        }
+      }
     } catch {
       messages.value = []
     }
-  } else {
-    messages.value = []
   }
 }
 
-/** 清空当前对话的消息 */
-function clearChat() {
-  messages.value = []
+/** 清空当前对话的消息（弹窗确认，同步数据库） */
+async function handleClearChat() {
+  try {
+    await ElMessageBox.confirm('确定要清空当前对话的所有聊天记录吗？此操作不可恢复。', '清空对话', {
+      confirmButtonText: '确定清空',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return // 用户取消
+  }
+  const conv = conversations.value.find((c) => c.id === activeId.value)
+  try {
+    if (conv && conv.dbId) {
+      await clearChatMessages(conv.dbId)
+    }
+    messages.value = []
+    clearDraft()
+    ElMessage.success('已清空')
+  } catch {
+    ElMessage.error('清空失败，请稍后重试')
+  }
+}
+
+/** 删除单个对话（同步到数据库） */
+async function handleDeleteChat(conv) {
+  openMenuId.value = null
+  // 调后端删除（失败也不影响本地移除）
+  if (conv.dbId) {
+    try {
+      await deleteChat(conv.dbId)
+    } catch (err) {
+      console.error('后端删除失败:', err)
+    }
+  }
+  // 清理草稿
+  localStorage.removeItem(`chat_draft_${conv.chatId || conv.id}`)
+  // 从列表中移除
+  conversations.value = conversations.value.filter((c) => c.id !== conv.id)
+  // 处理活跃对话切换
+  if (activeId.value === conv.id) {
+    if (conversations.value.length > 0) {
+      await switchChat(conversations.value[0])
+    } else {
+      activeId.value = null
+      messages.value = []
+    }
+  }
+}
+
+/** 重命名对话（同步到数据库） */
+async function handleRenameChat(conv) {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新标题', '重命名', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValue: conv.title === '新对话' ? '' : conv.title,
+      inputPlaceholder: '只允许字母、汉字、数字',
+      inputValidator: (val) => {
+        if (!val || !val.trim()) return '标题不能为空'
+        if (!/^[\u4e00-\u9fa5a-zA-Z0-9\s]+$/.test(val)) return '只允许字母、汉字和数字'
+        return true
+      },
+    })
+    const newTitle = (value || '').trim()
+    if (!newTitle || newTitle === conv.title) return
+
+    if (conv.dbId) {
+      await renameChat(conv.dbId, newTitle)
+    }
+    conv.title = newTitle
+  } catch {
+    // 用户取消
+  } finally {
+    openMenuId.value = null
+  }
+}
+
+/**
+ * 将当前消息存入 localStorage（取消生成时使用）
+ */
+function saveDraftToLocal() {
+  const conv = conversations.value.find((c) => c.id === activeId.value)
+  if (!conv || messages.value.length === 0) return
+  const key = `chat_draft_${conv.chatId || conv.id}`
+  localStorage.setItem(key, JSON.stringify(messages.value))
+}
+
+/**
+ * 从 localStorage 恢复草稿
+ */
+function loadDraftFromLocal(chatId) {
+  const key = `chat_draft_${chatId}`
+  const raw = localStorage.getItem(key)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+/** 清除当前对话的本地草稿 */
+function clearDraft() {
+  const conv = conversations.value.find((c) => c.id === activeId.value)
+  if (!conv) return
+  const key = `chat_draft_${conv.chatId || conv.id}`
+  localStorage.removeItem(key)
 }
 
 /**
@@ -100,7 +266,7 @@ function handleSend() {
 
   nextTick(() => scrollToBottom())
 
-  sendMessageStream(conv.chatId, text, {
+  abortFn.value = sendMessageStream(conv.chatId, text, {
     onChunk: (chunk) => {
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.role === 'assistant') {
@@ -110,22 +276,48 @@ function handleSend() {
     },
     onDone: () => {
       loading.value = false
-      // 如果流没有返回任何内容
+      abortFn.value = null
+      clearDraft()
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.content) {
         lastMsg.content = '抱歉，我暂时无法回复。'
       }
       nextTick(() => scrollToBottom())
     },
+    onCorrection: (corrected) => {
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        lastMsg.content = corrected
+        nextTick(() => scrollToBottom())
+      }
+    },
     onError: (err) => {
       console.error('SSE 流式错误:', err)
+      loading.value = false
+      abortFn.value = null
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.content) {
         lastMsg.content = '抱歉，服务暂时不可用，请稍后再试。'
       }
+    },
+    onCancel: () => {
       loading.value = false
+      abortFn.value = null
     },
   })
+}
+
+/**
+ * 停止生成 —— 取消 SSE 流，保留已生成内容到 localStorage
+ */
+function stopGeneration() {
+  if (abortFn.value) {
+    abortFn.value()
+    abortFn.value = null
+  }
+  loading.value = false
+  // 保留已生成内容，存入 localStorage
+  saveDraftToLocal()
 }
 
 function scrollToBottom() {
@@ -134,20 +326,19 @@ function scrollToBottom() {
   }
 }
 
-// 页面加载时自动创建一个会话
-onMounted(() => {
-  newChat()
+// 页面加载时恢复历史会话或创建新会话
+onMounted(async () => {
+  document.addEventListener('click', closeMenu)
+  if (userStore.isLoggedIn) {
+    await loadChatList()
+  }
+  // 没有对话时不做任何操作，等待用户主动创建
 })
 
-/**
- * 快捷提问
- */
-const quickQuestions = [
-  '我最近总是失眠，怎么办？',
-  '如何缓解工作压力？',
-  '总是感到焦虑正常吗？',
-  '怎样改善人际关系？',
-]
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeMenu)
+})
+
 </script>
 
 <template>
@@ -167,31 +358,37 @@ const quickQuestions = [
           @click="switchChat(conv)"
         >
           <span class="conv-title">{{ conv.title }}</span>
+          <span class="conv-menu-btn" @click.stop="toggleMenu(conv.id)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="5" cy="12" r="2" />
+              <circle cx="12" cy="12" r="2" />
+              <circle cx="19" cy="12" r="2" />
+            </svg>
+          </span>
+          <div v-if="openMenuId === conv.id" class="conv-menu-dropdown" @click.stop>
+            <div class="menu-item" @click="handleRenameChat(conv)">重命名</div>
+            <div class="menu-item danger" @click="handleDeleteChat(conv)">删除对话</div>
+          </div>
         </div>
       </div>
 
       <div class="sidebar-footer">
-        <el-button text @click="clearChat">清空对话</el-button>
+        <el-button type="danger" plain @click="handleClearChat">清空对话</el-button>
       </div>
     </aside>
 
     <!-- ======== 右侧聊天区 ======== -->
     <div class="chat-main">
-      <!-- 欢迎提示（无消息时显示） -->
-      <div v-if="messages.length === 0" class="chat-welcome">
-        <div class="welcome-avatar">🤖</div>
-        <h2>你好，我是心灵港湾 AI 助手</h2>
-        <p>你可以向我倾诉任何心理困扰，我会用心倾听并提供专业建议。</p>
-        <div class="quick-questions">
-          <el-button
-            v-for="q in quickQuestions"
-            :key="q"
-            round
-            @click="inputText = q; handleSend()"
-          >
-            {{ q }}
-          </el-button>
-        </div>
+      <!-- 没有对话或未选中：引导创建 -->
+      <div v-if="displayMode === 'empty'" class="chat-empty">
+        <span class="empty-emoji">💬</span>
+        <p>快来对话吧</p>
+      </div>
+
+      <!-- 选中了空对话：初始提示词 -->
+      <div v-else-if="displayMode === 'prompt'" class="chat-empty">
+        <span class="empty-emoji">💭</span>
+        <p>如果有心理上的问题 可以向我倾诉哦</p>
       </div>
 
       <!-- 消息列表 -->
@@ -232,14 +429,22 @@ const quickQuestions = [
           resize="none"
           @keydown.enter.exact.prevent="handleSend"
         />
-        <el-button
-          type="primary"
+        <button
           class="send-btn"
-          :disabled="!inputText.trim() || loading"
-          @click="handleSend"
+          :class="{ active: !!inputText.trim(), streaming: loading }"
+          :disabled="!inputText.trim() && !loading"
+          @click="loading ? stopGeneration() : handleSend()"
         >
-          发送
-        </el-button>
+          <!-- 发送箭头 -->
+          <svg v-if="!loading" class="send-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="19" x2="12" y2="5" />
+            <polyline points="5 12 12 5 19 12" />
+          </svg>
+          <!-- 停止方块 -->
+          <svg v-else class="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="3" y="3" width="18" height="18" rx="3" />
+          </svg>
+        </button>
       </div>
     </div>
   </div>
@@ -278,15 +483,22 @@ const quickQuestions = [
 }
 
 .conv-item {
+  display: flex;
+  align-items: center;
   padding: 12px 16px;
   border-radius: 8px;
   cursor: pointer;
   margin-bottom: 4px;
   transition: background 0.2s;
+  position: relative;
 }
 
 .conv-item:hover {
   background: #e8eaed;
+}
+
+.conv-item:hover .conv-menu-btn {
+  opacity: 1;
 }
 
 .conv-item.active {
@@ -296,10 +508,64 @@ const quickQuestions = [
 .conv-title {
   font-size: 14px;
   color: #333;
-  display: block;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conv-menu-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: #999;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  margin-left: 4px;
+}
+
+.conv-menu-btn:hover {
+  background: #ddd;
+  color: #555;
+}
+
+.conv-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 8px;
+  z-index: 100;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  min-width: 120px;
+}
+
+.menu-item {
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.menu-item:hover {
+  background: #f5f5f5;
+}
+
+.menu-item.danger {
+  color: #f56c6c;
+}
+
+.menu-item.danger:hover {
+  background: #fef0f0;
 }
 
 .sidebar-footer {
@@ -316,8 +582,8 @@ const quickQuestions = [
   min-width: 0;
 }
 
-/* ---- 欢迎页 ---- */
-.chat-welcome {
+/* ---- 空状态 ---- */
+.chat-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -327,27 +593,14 @@ const quickQuestions = [
   text-align: center;
 }
 
-.welcome-avatar {
-  font-size: 64px;
-  margin-bottom: 20px;
+.empty-emoji {
+  font-size: 48px;
+  margin-bottom: 16px;
 }
 
-.chat-welcome h2 {
-  font-size: 22px;
-  color: #303133;
-  margin-bottom: 8px;
-}
-
-.chat-welcome p {
+.chat-empty p {
   color: #909399;
-  margin-bottom: 28px;
-}
-
-.quick-questions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
+  font-size: 15px;
 }
 
 /* ---- 消息列表 ---- */
@@ -450,14 +703,50 @@ const quickQuestions = [
 /* ---- 底部输入 ---- */
 .chat-input {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 12px;
-  padding: 16px 24px;
+  padding: 12px 24px;
   border-top: 1px solid #ebeef5;
   background: #fff;
 }
 
 .send-btn {
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: #d9d9d9;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.send-btn.active {
+  background: #409eff;
+}
+
+.send-btn.active:hover {
+  background: #337ecc;
+}
+
+.send-btn.streaming {
+  background: #e6a23c;
+}
+
+.send-btn.streaming:hover {
+  background: #cf9236;
+}
+
+.send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.send-btn .stop-icon {
+  color: #fff;
 }
 </style>

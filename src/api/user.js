@@ -6,7 +6,7 @@ import request from '@/utils/request'
  * @returns {Promise} 后端返回的响应数据
  */
 export function register(data) {
-  return request.post('/user/add', data)
+  return request.post('/user/register', data)
 }
 
 /**

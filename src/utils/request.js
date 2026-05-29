@@ -57,24 +57,25 @@ request.interceptors.response.use(
   (error) => {
     // HTTP 层面的错误（404、500、网络断开等）
     const status = error.response?.status
+    const body = error.response?.data
 
     switch (status) {
       case 401:
         localStorage.removeItem('token')
-        ElMessage.error('登录已过期，请重新登录')
+        ElMessage.error(body?.msg || '登录已过期，请重新登录')
         window.location.href = '/login'
         break
       case 403:
-        ElMessage.error('没有权限访问')
+        ElMessage.error(body?.msg || '没有权限访问')
         break
       case 404:
-        ElMessage.error('请求的资源不存在')
+        ElMessage.error(body?.msg || '请求的资源不存在')
         break
       case 500:
-        ElMessage.error('服务器内部错误')
+        ElMessage.error(body?.msg || '服务器内部错误')
         break
       default:
-        ElMessage.error(error.message || '网络异常，请稍后重试')
+        ElMessage.error(body?.msg || error.message || '网络异常，请稍后重试')
     }
 
     return Promise.reject(error)

@@ -22,7 +22,7 @@ function handleLogout() {
         <div class="header-left">
           <router-link to="/" class="logo">
             <span class="logo-icon">🧠</span>
-            <span class="logo-text">心灵港湾</span>
+            <span class="logo-text">原神</span>
           </router-link>
           <nav class="header-nav">
             <router-link to="/">首页</router-link>

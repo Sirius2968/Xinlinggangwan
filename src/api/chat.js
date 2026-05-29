@@ -28,7 +28,7 @@ export function sendMessage(chatId, message) {
  *    onDone 在流正常结束时调用，onError 在异常时调用。
  *    返回 abort 函数，可用于中断请求。
  */
-export function sendMessageStream(chatId, message, { onChunk, onDone, onError }) {
+export function sendMessageStream(chatId, message, { onChunk, onDone, onError, onCorrection, onCancel }) {
   const controller = new AbortController()
   const token = localStorage.getItem('token') || ''
 
@@ -110,7 +110,10 @@ export function sendMessageStream(chatId, message, { onChunk, onDone, onError })
       onDone?.()
     })
     .catch((err) => {
-      if (err.name === 'AbortError') return
+      if (err.name === 'AbortError') {
+        onCancel?.()
+        return
+      }
       onError?.(err)
     })
 
@@ -128,7 +131,33 @@ export function getChatHistory(chatId) {
 }
 
 /**
- * 5. 列出所有活跃对话
+ * 5. 删除对话
+ *    DELETE /api/chat/{chat_id}
+ *    返回: { code: 200, msg: "已删除" }
+ */
+export function deleteChat(dbId) {
+  return request.delete(`/chat/${dbId}`)
+}
+
+/**
+ * 6. 重命名对话
+ *    PUT /api/chat/{db_id}/rename
+ *    请求体: { title: string }
+ */
+export function renameChat(dbId, title) {
+  return request.put(`/chat/${dbId}/rename`, { title })
+}
+
+/**
+ * 7. 清空对话消息
+ *    DELETE /api/chat/{db_id}/messages
+ */
+export function clearChatMessages(dbId) {
+  return request.delete(`/chat/${dbId}/messages`)
+}
+
+/**
+ * 8. 列出所有活跃对话
  *    GET /api/chat/list
  *    返回: 对话列表（具体字段以后端实际返回为准）
  */

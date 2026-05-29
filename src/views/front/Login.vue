@@ -122,12 +122,12 @@ async function handleSubmit() {
 
     try {
       const res = await loginApi({ username: form.account, password: form.password })
-      // 调试：打印后端实际返回的数据结构
       console.log('登录成功，后端返回:', JSON.stringify(res, null, 2))
 
-      // 后端返回格式：{ code, msg, data: { token, ... } }
-      const token = res.data?.token || res.token
-      const info = res.data || res
+      // 后端返回格式：{ code: 200, msg, data: { token, userInfo: { id, username, email, sex } } }
+      const payload = res.data || res
+      const token = payload.token || res.token
+      const info = payload.userInfo || payload
 
       userStore.setLogin({ token, userInfo: { ...info, account: form.account } })
       ElMessage.success('登录成功')
