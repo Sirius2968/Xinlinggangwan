@@ -58,3 +58,27 @@ class UpdatePasswordRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     chat_id: str = Field(..., description="对话 ID")
     message: str = Field(..., min_length=1, description="用户消息")
+
+
+# ============================================================
+# 心理健康记录相关
+# ============================================================
+
+class MentalHealthRecordRequest(BaseModel):
+    chat_id: str | None = Field(default=None, description="关联对话 ID")
+    mood_score: int = Field(..., ge=1, le=10, description="情绪评分 1-10")
+    emotion_type: str = Field(..., min_length=1, max_length=50, description="情绪类型")
+    description: str = Field(default="", max_length=500, description="补充描述")
+    ai_context: str = Field(default="", max_length=2000, description="AI 回复上下文")
+
+
+# ============================================================
+# 睡眠追踪相关
+# ============================================================
+
+class SleepRecordRequest(BaseModel):
+    chat_id: str | None = Field(default=None, description="关联对话 ID")
+    bed_time: str = Field(..., min_length=1, max_length=10, description="就寝时间 HH:MM")
+    wake_time: str = Field(..., min_length=1, max_length=10, description="起床时间 HH:MM")
+    quality: int = Field(..., ge=1, le=10, description="睡眠质量 1-10")
+    issues: str = Field(default="", max_length=500, description="睡眠问题")

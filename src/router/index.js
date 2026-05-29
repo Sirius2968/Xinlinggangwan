@@ -26,6 +26,11 @@ const router = createRouter({
           component: () => import('@/views/front/Counselors.vue'),
         },
         {
+          path: 'mental-health',
+          name: 'MentalHealth',
+          component: () => import('@/views/front/MentalHealth.vue'),
+        },
+        {
           path: 'about',
           name: 'About',
           component: () => import('@/views/front/About.vue'),

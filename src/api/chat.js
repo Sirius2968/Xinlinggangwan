@@ -28,7 +28,7 @@ export function sendMessage(chatId, message) {
  *    onDone 在流正常结束时调用，onError 在异常时调用。
  *    返回 abort 函数，可用于中断请求。
  */
-export function sendMessageStream(chatId, message, { onChunk, onDone, onError, onCorrection, onCancel }) {
+export function sendMessageStream(chatId, message, { onChunk, onDone, onError, onCorrection, onCancel, onFormTrigger }) {
   const controller = new AbortController()
   const token = localStorage.getItem('token') || ''
 
@@ -87,6 +87,10 @@ export function sendMessageStream(chatId, message, { onChunk, onDone, onError, o
               } else if (parsed.type === 'done') {
                 // 完成信号
                 onDone?.(parsed.content)
+              } else if (parsed.type === 'form_trigger') {
+                // 触发心理健康表单
+                console.log('SSE 收到 form_trigger:', parsed)
+                onFormTrigger?.(parsed.ai_context || '', parsed.msg_id || null)
               } else if (parsed.type === 'error') {
                 // 错误信号
                 onError?.(parsed.error)
@@ -149,11 +153,19 @@ export function renameChat(dbId, title) {
 }
 
 /**
- * 7. 清空对话消息
+ * 7. 清空当前对话的消息
  *    DELETE /api/chat/{db_id}/messages
  */
 export function clearChatMessages(dbId) {
   return request.delete(`/chat/${dbId}/messages`)
+}
+
+/**
+ * 7b. 清空当前账号下所有对话及消息
+ *     DELETE /api/chat/clear-all
+ */
+export function clearAllChats() {
+  return request.delete('/chat/clear-all')
 }
 
 /**
@@ -163,4 +175,74 @@ export function clearChatMessages(dbId) {
  */
 export function listChats() {
   return request.get('/chat/list')
+}
+
+/**
+ * 9. 提交心理健康记录表单
+ *    POST /api/mental-health/submit
+ */
+export function submitMentalHealth(data) {
+  return request.post('/mental-health/submit', data)
+}
+
+/**
+ * 10. 删除心理健康记录
+ *     DELETE /api/mental-health/{record_id}
+ */
+export function deleteMentalHealthRecord(recordId) {
+  return request.delete(`/mental-health/${recordId}`)
+}
+
+/**
+ * 11. 更新某条消息（用于持久化 form 表单状态）
+ *     PUT /api/chat/message/{msg_id}
+ */
+export function updateChatMessage(msgId, content) {
+  return request.put(`/chat/message/${msgId}`, { content })
+}
+
+// ============================================================
+// 睡眠追踪 API
+// ============================================================
+
+/**
+ * 13. 记录睡眠数据
+ *     POST /api/sleep/track
+ */
+export function trackSleep(data) {
+  return request.post('/sleep/track', data)
+}
+
+/**
+ * 14. 获取心理健康统计数据
+ *     GET /api/mental-health/stats
+ *     参数: period, emotion_type, start_date, end_date
+ */
+export function getMentalHealthStats(params) {
+  return request.get('/mental-health/stats', { params })
+}
+
+/**
+ * 15. 获取心理健康记录列表（带筛选）
+ *     GET /api/mental-health/records
+ *     参数: period, emotion_type, start_date, end_date
+ */
+export function getMentalHealthRecords(params) {
+  return request.get('/mental-health/records', { params })
+}
+
+/**
+ * 16. 获取睡眠记录列表
+ *     GET /api/sleep/records
+ */
+export function getSleepRecords() {
+  return request.get('/sleep/records')
+}
+
+/**
+ * 15. 删除睡眠记录
+ *     DELETE /api/sleep/{record_id}
+ */
+export function deleteSleepRecord(recordId) {
+  return request.delete(`/sleep/${recordId}`)
 }

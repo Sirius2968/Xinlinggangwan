@@ -11,6 +11,46 @@ from llm_service import generate_stream
 
 router = APIRouter(prefix="/api/chat", tags=["对话"])
 
+# 用户情绪好转的关键词（心情改善时鼓励记录）
+_IMPROVEMENT_KEYWORDS = [
+    "好多了", "好一些", "好点了", "好多啦", "感觉好", "好多啦",
+    "好转", "好多了", "好很多", "好多", "好多啦",
+    "开心了", "平静了", "放松了", "好点了", "舒服多", "好多啦",
+    "想通了", "释然", "轻松", "放下来", "想开",
+]
+
+# AI 建议记录的关键词（命中则触发表单）
+_RECORD_SUGGEST_KEYWORDS = [
+    "记录", "自评", "表单", "填写", "评估", "追踪",
+    "记录一下", "记录追踪", "记录今天",
+]
+
+# 睡眠相关关键词（命中则跳过心理健康表单，因为睡眠话题用 sleep_tracker 处理）
+_SLEEP_KEYWORDS = [
+    "睡眠", "失眠", "入睡", "早醒", "浅睡", "多梦", "熬夜",
+    "睡觉", "睡不着", "睡不好", "睡不深", "噩梦", "作息",
+    "就寝", "起床时间", "睡眠质量",
+]
+
+
+def _should_trigger_form(user_message: str, ai_response: str = "") -> bool:
+    """检测是否应触发心理健康表单：
+    1. 用户表示心情好转 → 鼓励记录
+    2. AI 主动建议记录 → 触发
+    注意：睡眠相关话题不弹，用 sleep_tracker 工具处理
+    """
+    # 睡眠话题不弹心理健康表单
+    if any(kw in user_message for kw in _SLEEP_KEYWORDS):
+        return False
+    if any(kw in ai_response for kw in _SLEEP_KEYWORDS):
+        return False
+
+    if any(kw in user_message for kw in _IMPROVEMENT_KEYWORDS):
+        return True
+    if any(kw in ai_response for kw in _RECORD_SUGGEST_KEYWORDS):
+        return True
+    return False
+
 
 def _check_ownership(session, user: dict | None) -> bool:
     """校验对话是否属于当前用户。session.user_id 为 NULL 视为匿名对话，不限制。"""
@@ -148,6 +188,19 @@ async def send_message_stream(
             # 发送完成信号
             yield f"data: {json.dumps({'type': 'done', 'content': complete}, ensure_ascii=False)}\n\n"
 
+            # 检测情绪内容或AI建议记录，触发心理健康表单
+            if _should_trigger_form(body.message, complete):
+                # 持久化 form 卡片消息，刷新后不丢失
+                form_state = json.dumps({
+                    "submitted": False,
+                    "ai_context": complete[:500],
+                }, ensure_ascii=False)
+                form_msg = ChatMessage(session_id=session.id, role="form", content=form_state)
+                db.add(form_msg)
+                db.commit()
+                db.refresh(form_msg)
+                yield f"data: {json.dumps({'type': 'form_trigger', 'ai_context': complete[:500], 'msg_id': form_msg.id}, ensure_ascii=False)}\n\n"
+
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
@@ -187,6 +240,26 @@ def list_chats(
     return ok(result)
 
 
+@router.delete("/clear-all")
+def clear_all_chats(
+    user: dict | None = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """清空当前账号下所有对话及其消息"""
+    if not user:
+        return fail(401, "请先登录")
+    sessions = (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == user["user_id"])
+        .all()
+    )
+    for s in sessions:
+        db.query(ChatMessage).filter(ChatMessage.session_id == s.id).delete()
+        db.delete(s)
+    db.commit()
+    return ok(None, "已清空所有对话")
+
+
 @router.get("/{chat_id}/history")
 def get_history(
     chat_id: str,
@@ -201,7 +274,7 @@ def get_history(
     if not _check_ownership(session, user):
         return fail(403, "无权访问此对话")
 
-    messages = [{"role": m.role, "content": m.content} for m in session.messages]
+    messages = [{"role": m.role, "content": m.content, "id": m.id} for m in session.messages]
     return ok({"chat_id": chat_id, "messages": messages})
 
 
@@ -260,3 +333,23 @@ def rename_chat(
     session.title = title
     db.commit()
     return ok({"chat_id": session.chat_id, "title": title})
+
+
+@router.put("/message/{msg_id}")
+def update_message(
+    msg_id: int,
+    body: dict,
+    user: dict | None = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """更新某条消息的内容（用于持久化 form 表单的提交状态）"""
+    msg = db.query(ChatMessage).filter(ChatMessage.id == msg_id).first()
+    if not msg:
+        return fail(404, "消息不存在")
+    # 通过 session 校验归属
+    session = db.query(ChatSession).filter(ChatSession.id == msg.session_id).first()
+    if not session or not _check_ownership(session, user):
+        return fail(403, "无权修改此消息")
+    msg.content = body.get("content", msg.content)
+    db.commit()
+    return ok(None, "已更新")

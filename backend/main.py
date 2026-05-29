@@ -12,7 +12,7 @@ API 文档自动生成:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import users, chat
+from routers import users, chat, mental_health, sleep
 
 # ============================================================
 # 创建所有数据库表（如果不存在则自动创建）
@@ -42,6 +42,8 @@ app.add_middleware(
 # ============================================================
 app.include_router(users.router)
 app.include_router(chat.router)
+app.include_router(mental_health.router)
+app.include_router(sleep.router)
 
 
 # ============================================================

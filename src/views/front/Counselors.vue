@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { createChat, sendMessageStream, getChatHistory, listChats, deleteChat, renameChat, clearChatMessages } from '@/api/chat'
+import { createChat, sendMessageStream, getChatHistory, listChats, deleteChat, renameChat, clearAllChats, submitMentalHealth, updateChatMessage } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
@@ -12,6 +12,22 @@ const userStore = useUserStore()
 const conversations = ref([])
 const activeId = ref(null)
 const openMenuId = ref(null)  // 当前打开的下拉菜单所属的对话 ID
+
+// 起始对话引导
+const starterPrompts = [
+  '今天我的心情很糟糕',
+  '最近总是感觉很焦虑',
+  '工作和生活让我压力很大',
+  '最近我学会了一些放松的方式',
+  '我总是控制不住想太多',
+  '今天想分享一些开心的事情',
+]
+
+/** 点击起始引导词，填入输入框并发送 */
+function handleStarterPrompt(text) {
+  inputText.value = text
+  handleSend()
+}
 
 /** 切换下拉菜单 */
 function toggleMenu(convId) {
@@ -74,6 +90,66 @@ const loading = ref(false)
 const abortFn = ref(null)
 const chatArea = ref(null)
 
+// ============================================================
+// A2UI 心理健康表单（对话内嵌，非弹窗）
+// ============================================================
+const emotionOptions = ['开心', '平静', '充满希望', '感恩', '满足', '放松', '焦虑', '悲伤', '愤怒', '恐惧', '压力', '其他']
+
+/** 在对话中插入一张可填写的心理健康自评卡片 */
+function insertFormCard(aiContext, msgId = null) {
+  const formId = 'form_' + (msgId || Date.now())
+  messages.value.push({
+    role: 'form',
+    formId,
+    msgId,           // 数据库主键，用于后续持久化更新
+    submitted: false,
+    submitting: false,
+    formData: {
+      mood_score: 5,
+      emotion_type: '',
+      description: '',
+      ai_context: aiContext || '',
+    },
+    time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+  })
+  nextTick(() => scrollToBottom())
+}
+
+/** 提交某张表单卡片 */
+async function submitFormCard(msg) {
+  if (!msg.formData.emotion_type) {
+    ElMessage.warning('请选择情绪类型')
+    return
+  }
+  msg.submitting = true
+  try {
+    const conv = conversations.value.find((c) => c.id === activeId.value)
+    await submitMentalHealth({
+      chat_id: conv?.chatId || null,
+      mood_score: msg.formData.mood_score,
+      emotion_type: msg.formData.emotion_type,
+      description: msg.formData.description,
+      ai_context: msg.formData.ai_context,
+    })
+    msg.submitted = true
+    msg.submitting = false
+    // 持久化提交状态到数据库（刷新后不丢失）
+    if (msg.msgId) {
+      try {
+        await updateChatMessage(msg.msgId, JSON.stringify({
+          submitted: true,
+          formData: msg.formData,
+          ai_context: msg.formData.ai_context || '',
+        }))
+      } catch { /* 持久化失败不阻塞 */ }
+    }
+    ElMessage.success('已保存')
+  } catch {
+    ElMessage.error('保存失败，请稍后重试')
+    msg.submitting = false
+  }
+}
+
 /** 当前聊天区的显示模式：'empty' | 'prompt' | 'messages' */
 const displayMode = computed(() => {
   if (conversations.value.length === 0 || !activeId.value) return 'empty'
@@ -104,11 +180,35 @@ async function switchChat(conv) {
     try {
       const res = await getChatHistory(conv.chatId)
       const list = res.messages || res.data?.messages || res.data || []
-      messages.value = (Array.isArray(list) ? list : []).map((m) => ({
-        role: m.role,
-        content: m.content,
-        time: m.time || '',
-      }))
+      messages.value = (Array.isArray(list) ? list : []).map((m) => {
+        // 解析持久化的 form 卡片消息
+        if (m.role === 'form') {
+          try {
+            const data = JSON.parse(m.content)
+            return {
+              role: 'form',
+              formId: 'form_' + (m.id || Date.now()),
+              msgId: m.id,
+              submitted: data.submitted || false,
+              submitting: false,
+              formData: data.formData || {
+                mood_score: 5,
+                emotion_type: data.emotion_type || '',
+                description: data.description || '',
+                ai_context: data.ai_context || '',
+              },
+              time: m.time || '',
+            }
+          } catch {
+            return { role: m.role, content: m.content, time: m.time || '' }
+          }
+        }
+        return {
+          role: m.role,
+          content: m.content,
+          time: m.time || '',
+        }
+      })
       // 如果有本地草稿（上次未完成的对话），追加到历史后面
       const draft = loadDraftFromLocal(conv.chatId)
       if (draft && draft.length > 0) {
@@ -128,10 +228,10 @@ async function switchChat(conv) {
   }
 }
 
-/** 清空当前对话的消息（弹窗确认，同步数据库） */
+/** 清空当前账号下所有对话及消息（弹窗确认，同步数据库） */
 async function handleClearChat() {
   try {
-    await ElMessageBox.confirm('确定要清空当前对话的所有聊天记录吗？此操作不可恢复。', '清空对话', {
+    await ElMessageBox.confirm('确定要清空当前账号下所有的对话记录吗？此操作不可恢复。', '清空全部对话', {
       confirmButtonText: '确定清空',
       cancelButtonText: '取消',
       type: 'warning',
@@ -139,14 +239,16 @@ async function handleClearChat() {
   } catch {
     return // 用户取消
   }
-  const conv = conversations.value.find((c) => c.id === activeId.value)
   try {
-    if (conv && conv.dbId) {
-      await clearChatMessages(conv.dbId)
-    }
+    await clearAllChats()
+    // 清空本地状态
+    conversations.value = []
+    activeId.value = null
     messages.value = []
     clearDraft()
-    ElMessage.success('已清空')
+    // 立即重新渲染：从数据库加载空列表
+    await loadChatList()
+    ElMessage.success('已清空全部对话')
   } catch {
     ElMessage.error('清空失败，请稍后重试')
   }
@@ -256,9 +358,11 @@ function handleSend() {
   inputText.value = ''
   loading.value = true
 
-  // 更新对话标题
-  if (conv.title === '新对话') {
-    conv.title = text.slice(0, 15) + (text.length > 15 ? '…' : '')
+  // 更新对话标题（本地 + 持久化到数据库）
+  if (conv.title === '新对话' && conv.dbId) {
+    const newTitle = text.slice(0, 15) + (text.length > 15 ? '…' : '')
+    conv.title = newTitle
+    renameChat(conv.dbId, newTitle).catch(() => {})
   }
 
   // 先插入一条空的 AI 消息，后续逐步填充
@@ -303,6 +407,10 @@ function handleSend() {
     onCancel: () => {
       loading.value = false
       abortFn.value = null
+    },
+    onFormTrigger: (aiContext, msgId) => {
+      console.log('收到 form_trigger 事件, ai_context:', aiContext?.slice(0, 50), 'msgId:', msgId)
+      insertFormCard(aiContext, msgId)
     },
   })
 }
@@ -385,10 +493,18 @@ onBeforeUnmount(() => {
         <p>快来对话吧</p>
       </div>
 
-      <!-- 选中了空对话：初始提示词 -->
+      <!-- 选中了空对话：初始提示词 + 起始对话引导 -->
       <div v-else-if="displayMode === 'prompt'" class="chat-empty">
         <span class="empty-emoji">💭</span>
         <p>如果有心理上的问题 可以向我倾诉哦</p>
+        <div class="starter-prompts">
+          <button
+            v-for="(prompt, idx) in starterPrompts"
+            :key="idx"
+            class="starter-btn"
+            @click="handleStarterPrompt(prompt)"
+          >{{ prompt }}</button>
+        </div>
       </div>
 
       <!-- 消息列表 -->
@@ -397,26 +513,57 @@ onBeforeUnmount(() => {
         ref="chatArea"
         class="chat-messages"
       >
-        <div
-          v-for="(msg, i) in messages"
-          :key="i"
-          class="message-row"
-          :class="msg.role === 'user' ? 'msg-user' : 'msg-ai'"
-        >
-          <div class="msg-avatar">
-            {{ msg.role === 'user' ? '👤' : '🤖' }}
-          </div>
-          <div class="msg-body">
-            <div class="msg-bubble" :class="{ typing: msg.role === 'assistant' && !msg.content }">
-              <template v-if="msg.content">{{ msg.content }}</template>
-              <template v-else>
-                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-              </template>
+        <template v-for="(msg, i) in messages" :key="i">
+          <!-- 心理健康表单卡片 -->
+          <div v-if="msg.role === 'form'" class="form-card">
+            <div class="form-card-header">
+              <span class="form-card-icon">📋</span>
+              <span>心理健康自评（可选）</span>
             </div>
-            <span class="msg-time">{{ msg.time }}</span>
+            <template v-if="msg.submitted">
+              <div class="form-done">
+                <span>✅</span> 已保存 — {{ msg.formData.emotion_type }} · 评分 {{ msg.formData.mood_score }}/10
+              </div>
+            </template>
+            <template v-else>
+              <div class="form-card-body">
+                <div class="form-row">
+                  <span class="form-label">情绪评分</span>
+                  <span class="form-score-badge">{{ msg.formData.mood_score }}</span>
+                  <el-slider v-model="msg.formData.mood_score" :min="1" :max="10" :step="1" show-stops size="small" style="flex:1; margin-left:8px;" />
+                </div>
+                <div class="form-row">
+                  <span class="form-label">情绪类型</span>
+                  <el-select v-model="msg.formData.emotion_type" placeholder="选择情绪" size="small" style="width:140px;">
+                    <el-option v-for="e in emotionOptions" :key="e" :label="e" :value="e" />
+                  </el-select>
+                </div>
+                <div class="form-row">
+                  <el-input v-model="msg.formData.description" type="textarea" :rows="2" maxlength="200" show-word-limit size="small" placeholder="补充描述（可选）" />
+                </div>
+                <el-button type="primary" size="small" :loading="msg.submitting" @click="submitFormCard(msg)">
+                  提交记录
+                </el-button>
+              </div>
+            </template>
           </div>
-        </div>
 
+          <!-- 普通消息 -->
+          <div v-else class="message-row" :class="msg.role === 'user' ? 'msg-user' : 'msg-ai'">
+            <div class="msg-avatar">
+              {{ msg.role === 'user' ? '👤' : '🤖' }}
+            </div>
+            <div class="msg-body">
+              <div class="msg-bubble" :class="{ typing: msg.role === 'assistant' && !msg.content }">
+                <template v-if="msg.content">{{ msg.content }}</template>
+                <template v-else>
+                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                </template>
+              </div>
+              <span class="msg-time">{{ msg.time }}</span>
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- 底部输入区 -->
@@ -447,6 +594,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -601,6 +749,36 @@ onBeforeUnmount(() => {
 .chat-empty p {
   color: #909399;
   font-size: 15px;
+  margin-bottom: 20px;
+}
+
+/* 起始对话引导按钮 */
+.starter-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  max-width: 480px;
+}
+
+.starter-btn {
+  padding: 8px 18px;
+  background: #fff;
+  border: 1px solid #e0d4d0;
+  border-radius: 20px;
+  color: #6b5b5b;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.starter-btn:hover {
+  background: #f8f0ed;
+  border-color: #c4a89e;
+  color: #4a3b3b;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(180, 140, 120, 0.15);
 }
 
 /* ---- 消息列表 ---- */
@@ -748,5 +926,69 @@ onBeforeUnmount(() => {
 
 .send-btn .stop-icon {
   color: #fff;
+}
+
+/* ---- A2UI 内嵌表单卡片 ---- */
+.form-card {
+  max-width: 75%;
+  margin: 0 0 20px 48px;
+  background: #fff;
+  border: 1px solid #e0e4ed;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.03);
+}
+
+.form-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 14px;
+}
+
+.form-card-icon {
+  font-size: 18px;
+}
+
+.form-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.form-label {
+  color: #606266;
+  white-space: nowrap;
+  min-width: 56px;
+}
+
+.form-score-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #409eff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.form-done {
+  font-size: 14px;
+  color: #67c23a;
+  padding: 8px 0;
 }
 </style>
