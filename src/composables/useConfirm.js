@@ -8,6 +8,12 @@ let pendingResolve = null
 
 export function useConfirm() {
   function confirm(message, options = {}) {
+    // 拒绝上一个未完成的 Promise，防止内存泄漏
+    if (pendingResolve) {
+      const prev = pendingResolve
+      pendingResolve = null
+      prev(false)
+    }
     dialogMessage.value = message
     dialogTitle.value = options.title || '确认'
     dialogType.value = options.type || 'warning'

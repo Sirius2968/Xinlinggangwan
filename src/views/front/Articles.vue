@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useArticleStore } from '@/stores/articles'
 import { useUserStore } from '@/stores/user'
@@ -13,6 +13,19 @@ const userStore = useUserStore()
 const showFavoritesOnly = ref(false)
 const sharedArticles = ref([])
 const sharedFavIds = ref(new Set())  // 当前用户已收藏的社区文章 ID（按账号隔离）
+
+// 本地防抖搜索（250ms），避免每次按键触发 Pinia computed 重算
+const localSearchQuery = ref(store.searchQuery)
+let searchTimer = null
+watch(localSearchQuery, (val) => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    store.setSearchQuery(val)
+  }, 250)
+})
+watch(() => store.searchQuery, (val) => {
+  localSearchQuery.value = val
+})
 
 const displayArticles = computed(() =>
   showFavoritesOnly.value ? store.favoritedArticles : store.filteredArticles
@@ -93,7 +106,7 @@ onMounted(() => loadSharedArticles())
       <div class="search-wrap">
         <span class="search-icon">&#x1f50d;</span>
         <input
-          v-model="store.searchQuery"
+          v-model="localSearchQuery"
           type="text"
           placeholder="搜索文章标题、标签..."
           class="search-input"

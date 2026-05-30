@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
+import { setAuthToken } from '@/utils/request'
 
 /**
  * 用户状态管理
@@ -20,17 +21,17 @@ export const useUserStore = defineStore('user', () => {
   function setLogin(data) {
     token.value = data.token
     userInfo.value = data.userInfo || data
-    // 同步写入 localStorage
     localStorage.setItem('token', data.token)
     localStorage.setItem('userInfo', JSON.stringify(userInfo.value))
+    setAuthToken(data.token)
   }
 
-  /** 退出登录：清空所有状态 */
   function logout() {
     token.value = ''
     userInfo.value = null
     localStorage.removeItem('token')
     localStorage.removeItem('userInfo')
+    setAuthToken('')
   }
 
   return { token, userInfo, isLoggedIn, setLogin, logout }

@@ -109,6 +109,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
   display: flex;
   flex-direction: column;
   background: #f5f7fa;
+  overflow-x: hidden;
 }
 
 /* ===== 顶部导航 ===== */

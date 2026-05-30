@@ -133,12 +133,15 @@ function destroyCharts() {
 }
 
 function renderCharts() {
-  destroyCharts()
-  if (!stats.value) return
+  // 无数据时销毁图表，释放 Canvas
+  if (!stats.value) {
+    destroyCharts()
+    return
+  }
 
   // ------ 趋势折线图 ------
   if (trendChartRef.value && stats.value.trend?.length) {
-    trendChart = echarts.init(trendChartRef.value)
+    if (!trendChart) { trendChart = echarts.init(trendChartRef.value) }
     const data = stats.value.trend
     trendChart.setOption({
       tooltip: { trigger: 'axis', confine: true },
@@ -172,12 +175,12 @@ function renderCharts() {
           ],
         },
       }],
-    })
+    }, { notMerge: true })
   }
 
   // ------ 情绪分布饼图 ------
   if (distChartRef.value && stats.value.distribution?.length) {
-    distChart = echarts.init(distChartRef.value)
+    if (!distChart) { distChart = echarts.init(distChartRef.value) }
     const data = stats.value.distribution.map(d => ({
       name: d.name,
       value: d.count,
@@ -196,12 +199,12 @@ function renderCharts() {
         color: ['#67c23a', '#409eff', '#e6a23c', '#f56c6c', '#909399', '#b37feb',
                 '#5cdbd3', '#ff85c0', '#ffc069', '#95de64', '#69c0ff', '#ff9c6e'],
       }],
-    })
+    }, { notMerge: true })
   }
 
   // ------ 等级分布柱状图 ------
   if (levelChartRef.value && stats.value.level_distribution?.length) {
-    levelChart = echarts.init(levelChartRef.value)
+    if (!levelChart) { levelChart = echarts.init(levelChartRef.value) }
     const data = stats.value.level_distribution
     const colors = { '较差': '#f56c6c', '一般': '#e6a23c', '良好': '#67c23a' }
     levelChart.setOption({
@@ -227,16 +230,24 @@ function renderCharts() {
         })),
         label: { show: true, position: 'top', fontSize: 13, fontWeight: 'bold', color: '#8b7a74' },
       }],
-    })
+    }, { notMerge: true })
   }
 }
 
-// 窗口大小变化时重绘
-function onResize() {
+// 窗口大小变化时重绘（150ms 防抖，避免拖拽窗口时频繁触发）
+function debounce(fn, delay = 150) {
+  let timer = null
+  return function (...args) {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn.apply(this, args), delay)
+  }
+}
+
+const onResize = debounce(() => {
   trendChart?.resize()
   distChart?.resize()
   levelChart?.resize()
-}
+})
 
 // 监听筛选条件变化
 watch([period, emotionFilter, scoreFilter], () => {

@@ -10,18 +10,23 @@ const request = axios.create({
   timeout: 10000,         // 10 秒超时，超时自动取消请求
 })
 
+// 缓存 token，避免每次请求都同步读取 localStorage
+let cachedToken = localStorage.getItem('token') || ''
+export function setAuthToken(token) {
+  cachedToken = token || ''
+}
+
 // ============================================================
 // 请求拦截器 —— 发请求之前做的事
 // ============================================================
 request.interceptors.request.use(
   (config) => {
-    // 从 localStorage 取出 token，塞到请求头的 Authorization 字段
-    // 后端通过这个 token 识别"你是谁"
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = 'Bearer ' + token
+    if (cachedToken) {
+      config.headers.Authorization = 'Bearer ' + cachedToken
     }
-    console.log('>>> 请求:', config.method?.toUpperCase(), config.baseURL + config.url, config.data ? JSON.stringify(config.data) : '')
+    if (import.meta.env.DEV) {
+      console.log('>>> 请求:', config.method?.toUpperCase(), config.baseURL + config.url, config.data ? JSON.stringify(config.data) : '')
+    }
     return config // 必须返回 config，否则请求发不出去
   },
   (error) => {

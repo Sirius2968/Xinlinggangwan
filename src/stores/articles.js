@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { shallowRef, ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useUserStore } from '@/stores/user'
 
@@ -149,11 +149,11 @@ function loadFavorites() {
 
 export const useArticleStore = defineStore('articles', () => {
   // ---- 状态 ----
-  const articles = ref(ARTICLE_DATA)
-  const favorites = ref(loadFavorites())
+  const articles = shallowRef(ARTICLE_DATA)       // 静态数据，整体替换
+  const favorites = shallowRef(loadFavorites())   // 每次 toggle 替换为新 Set
   const searchQuery = ref('')
   const activeCategory = ref('全部')
-  const selectedArticle = ref(null)
+  const selectedArticle = shallowRef(null)        // 打开详情时整体替换
 
   // ---- 计算属性 ----
   const categories = computed(() => CATEGORIES)

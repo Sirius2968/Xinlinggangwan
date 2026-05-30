@@ -375,7 +375,7 @@ function handleSend() {
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.role === 'assistant') {
         lastMsg.content += chunk
-        nextTick(() => scrollToBottom())
+        nextTick(() => scrollToBottomSmooth())
       }
     },
     onDone: () => {
@@ -386,13 +386,13 @@ function handleSend() {
       if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.content) {
         lastMsg.content = '抱歉，我暂时无法回复。'
       }
-      nextTick(() => scrollToBottom())
+      nextTick(() => scrollToBottomSmooth())
     },
     onCorrection: (corrected) => {
       const lastMsg = messages.value[messages.value.length - 1]
       if (lastMsg && lastMsg.role === 'assistant') {
         lastMsg.content = corrected
-        nextTick(() => scrollToBottom())
+        nextTick(() => scrollToBottomSmooth())
       }
     },
     onError: (err) => {
@@ -432,6 +432,17 @@ function scrollToBottom() {
   if (chatArea.value) {
     chatArea.value.scrollTop = chatArea.value.scrollHeight
   }
+}
+
+// RAF 节流滚动，防止 SSE 流式输出时高频调用导致 layout thrashing
+let scrollPending = false
+function scrollToBottomSmooth() {
+  if (scrollPending) return
+  scrollPending = true
+  requestAnimationFrame(() => {
+    scrollPending = false
+    scrollToBottom()
+  })
 }
 
 // 页面加载时恢复历史会话或创建新会话
@@ -992,6 +1003,75 @@ onBeforeUnmount(() => {
   font-size: 14px;
   color: #67c23a;
   padding: 8px 0;
+}
+
+/* ===== PC端小窗口适配（窗口缩窄时不出现横向滚动条） ===== */
+@media (max-width: 900px) {
+  .ai-chat {
+    height: calc(100vh - 160px);
+    min-height: 400px;
+  }
+
+  .chat-sidebar {
+    width: 200px;
+  }
+
+  .chat-messages {
+    padding: 16px 16px;
+  }
+
+  .chat-input {
+    padding: 10px 16px;
+  }
+
+  .message-row {
+    max-width: 88%;
+  }
+
+  .form-card {
+    max-width: 85%;
+    margin-left: 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-sidebar {
+    width: 160px;
+  }
+
+  .conv-item {
+    padding: 10px 8px;
+  }
+
+  .conv-title {
+    font-size: 12px;
+  }
+
+  .new-chat-btn {
+    margin: 10px;
+    font-size: 13px;
+  }
+
+  .chat-messages {
+    padding: 12px;
+  }
+
+  .chat-input {
+    padding: 8px 12px;
+  }
+
+  .message-row {
+    max-width: 92%;
+  }
+
+  .form-card {
+    max-width: 92%;
+    margin-left: 8px;
+  }
+
+  .sidebar-footer {
+    padding: 8px 10px;
+  }
 }
 
 </style>
