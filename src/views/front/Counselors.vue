@@ -1,10 +1,15 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 import { createChat, sendMessageStream, getChatHistory, listChats, deleteChat, renameChat, clearAllChats, submitMentalHealth, updateChatMessage } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
+import LoginGate from '@/components/common/LoginGate.vue'
 
+const router = useRouter()
 const userStore = useUserStore()
+const { confirm } = useConfirm()
 
 // ============================================================
 // 对话列表（左侧边栏）
@@ -230,15 +235,10 @@ async function switchChat(conv) {
 
 /** 清空当前账号下所有对话及消息（弹窗确认，同步数据库） */
 async function handleClearChat() {
-  try {
-    await ElMessageBox.confirm('确定要清空当前账号下所有的对话记录吗？此操作不可恢复。', '清空全部对话', {
-      confirmButtonText: '确定清空',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch {
-    return // 用户取消
-  }
+  const ok = await confirm('确定要清空当前账号下所有的对话记录吗？此操作不可恢复。', {
+    title: '清空全部对话',
+  })
+  if (!ok) return
   try {
     await clearAllChats()
     // 清空本地状态
@@ -450,7 +450,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="ai-chat">
+  <LoginGate v-if="!userStore.isLoggedIn" message="登录后即可使用 AI 心理咨询服务" />
+
+  <div v-else class="ai-chat">
     <!-- ======== 左侧边栏 ======== -->
     <aside class="chat-sidebar">
       <el-button type="primary" class="new-chat-btn" @click="newChat">
@@ -991,4 +993,5 @@ onBeforeUnmount(() => {
   color: #67c23a;
   padding: 8px 0;
 }
+
 </style>

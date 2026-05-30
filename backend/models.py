@@ -63,7 +63,7 @@ class MentalHealthRecord(Base):
     emotion_type = Column(String(50), nullable=False)        # 情绪类型
     description = Column(Text, default="")                   # 用户补充描述
     ai_context = Column(Text, default="")                    # 触发时的 AI 回复上下文
-    created_at = Column(DateTime, server_default=func.now())  # 数据库自动时间戳
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User")
 
@@ -81,6 +81,33 @@ class SleepRecord(Base):
     duration_hours = Column(Integer, default=0)             # 睡眠时长（小时）
     issues = Column(Text, default="")                       # 睡眠问题描述
     tips_given = Column(Text, default="")                   # AI 给过的建议
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class SharedArticle(Base):
+    """用户分享的心理知识文章"""
+    __tablename__ = "shared_articles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    tags = Column(String(500), default="")          # 逗号分隔的标签
+    favorite_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class ArticleFavorite(Base):
+    """文章收藏关联表 —— 记录用户收藏了哪些文章"""
+    __tablename__ = "article_favorites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    article_id = Column(Integer, ForeignKey("shared_articles.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User")

@@ -66,8 +66,10 @@ def create_chat(
     user: dict | None = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """创建新的对话会话"""
-    session = ChatSession(user_id=user["user_id"] if user else None)
+    """创建新的对话会话（需要登录）"""
+    if not user:
+        return fail(401, "请先登录")
+    session = ChatSession(user_id=user["user_id"])
     db.add(session)
     db.commit()
     db.refresh(session)

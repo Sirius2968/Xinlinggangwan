@@ -82,3 +82,13 @@ class SleepRecordRequest(BaseModel):
     wake_time: str = Field(..., min_length=1, max_length=10, description="起床时间 HH:MM")
     quality: int = Field(..., ge=1, le=10, description="睡眠质量 1-10")
     issues: str = Field(default="", max_length=500, description="睡眠问题")
+
+
+# ============================================================
+# 文章分享相关
+# ============================================================
+
+class ArticleRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200, description="文章标题")
+    content: str = Field(..., min_length=1, description="文章内容")
+    tags: str = Field(default="", max_length=500, description="标签，逗号分隔")

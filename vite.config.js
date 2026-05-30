@@ -72,6 +72,10 @@ export default defineConfig({
       external: Object.keys(CDN_EXTERNALS),
       output: {
         globals: CDN_EXTERNALS,
+        manualChunks(id) {
+          if (id.includes('node_modules/element-plus')) return 'element-plus'
+          if (id.includes('node_modules/echarts')) return 'echarts'
+        },
       },
     },
   },

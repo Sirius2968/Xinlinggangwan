@@ -49,12 +49,13 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
         <div class="header-left">
           <router-link to="/" class="logo" @click="closeMobileMenu">
             <span class="logo-icon">🧠</span>
-            <span class="logo-text">原神</span>
+            <span class="logo-text">心灵港湾</span>
           </router-link>
           <!-- 桌面端导航 -->
           <nav class="header-nav">
             <router-link to="/">首页</router-link>
             <router-link to="/articles">心理知识</router-link>
+            <router-link to="/article-share">心理知识分享</router-link>
             <router-link to="/counselors">AI咨询</router-link>
             <router-link to="/mental-health">记录心理健康</router-link>
           </nav>
@@ -82,6 +83,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
         <nav v-if="mobileMenuOpen" class="mobile-nav-dropdown" @click.stop>
           <router-link to="/" @click="handleNavClick">首页</router-link>
           <router-link to="/articles" @click="handleNavClick">心理知识</router-link>
+          <router-link to="/article-share" @click="handleNavClick">心理知识分享</router-link>
           <router-link to="/counselors" @click="handleNavClick">AI咨询</router-link>
           <router-link to="/mental-health" @click="handleNavClick">记录心理健康</router-link>
         </nav>

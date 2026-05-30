@@ -65,7 +65,13 @@ function goTo(route) {
     <div class="carousel-wrapper" @mouseenter="pauseCarousel" @mouseleave="resumeCarousel">
       <el-carousel ref="carouselRef" height="500px" :interval="4000" arrow="always">
         <el-carousel-item v-for="n in 5" :key="n">
-          <img :src="`/images/carousel/${n}.jpg`" :alt="`轮播图 ${n}`" class="slide-img" />
+          <img
+            :src="`/images/carousel/${n}.jpg`"
+            :alt="`轮播图 ${n}`"
+            class="slide-img"
+            :loading="n === 1 ? undefined : 'lazy'"
+            decoding="async"
+          />
         </el-carousel-item>
       </el-carousel>
       <div class="hero-overlay">
@@ -110,7 +116,7 @@ function goTo(route) {
     </section>
 
     <!-- ===== 3. 什么是心理健康 ===== -->
-    <section class="section what-section">
+        <section class="section what-section">
       <div class="what-container">
         <div class="what-text anim-item">
           <h2>什么是心理健康？</h2>
@@ -155,9 +161,9 @@ function goTo(route) {
         </div>
       </div>
     </section>
-
+    
     <!-- ===== 4. 常见心理健康问题 ===== -->
-    <section class="section issues-section">
+        <section class="section issues-section">
       <h2 class="section-title anim-item">常见心理健康问题</h2>
       <p class="section-desc anim-item">了解这些问题，是关爱自己和他人的第一步</p>
       <div class="issues-grid">
@@ -223,9 +229,9 @@ function goTo(route) {
         </div>
       </div>
     </section>
-
+    
     <!-- ===== 5. 忽视心理健康的危害 ===== -->
-    <section class="section danger-section">
+        <section class="section danger-section">
       <div class="danger-container anim-item">
         <h2>忽视心理健康的代价</h2>
         <p class="danger-subtitle">心理健康问题不会自行消失，拖延只会让情况变得更糟</p>
@@ -253,9 +259,9 @@ function goTo(route) {
         </div>
       </div>
     </section>
-
+    
     <!-- ===== 6. 如何正确看待心理健康 ===== -->
-    <section class="section view-section">
+        <section class="section view-section">
       <h2 class="section-title anim-item">正确看待心理健康</h2>
       <div class="view-grid">
         <div class="view-card anim-item">
@@ -302,9 +308,9 @@ function goTo(route) {
         </div>
       </div>
     </section>
-
+    
     <!-- ===== 7. 日常心理调适方法 ===== -->
-    <section class="section tips-section">
+        <section class="section tips-section">
       <h2 class="section-title anim-item">日常心理调适方法</h2>
       <p class="section-desc anim-item">将以下方法融入日常生活，逐步建立心理韧性</p>
       <div class="tips-grid">
@@ -340,9 +346,9 @@ function goTo(route) {
         </div>
       </div>
     </section>
-
+    
     <!-- ===== 8. 统计数据 ===== -->
-    <section class="section stats-section anim-item">
+        <section class="section stats-section anim-item">
       <div class="stats-grid">
         <div class="stat-item">
           <span class="stat-num">{{ count1 }}+</span>
@@ -362,9 +368,9 @@ function goTo(route) {
         </div>
       </div>
     </section>
-
+    
     <!-- ===== 9. CTA ===== -->
-    <section class="section cta-section anim-item">
+        <section class="section cta-section anim-item">
       <h2>准备好了吗？</h2>
       <p>迈出第一步，就是改变的开始。我们的AI心理咨询师随时准备倾听你的故事。</p>
       <div class="cta-buttons">
@@ -372,13 +378,13 @@ function goTo(route) {
         <el-button size="large" round class="cta-outline" @click="goTo('/articles')">浏览心理知识</el-button>
       </div>
     </section>
-
+    
     <!-- ===== 10. 底部 ===== -->
-    <footer class="home-footer anim-item">
+        <footer class="home-footer anim-item">
       <p>心灵港湾 &mdash; 关爱心理健康，让每一颗心都被温柔以待</p>
       <p class="footer-sub">如果你正处于危机中，请拨打全国心理援助热线：<strong>400-161-9995</strong></p>
     </footer>
-  </div>
+      </div>
 </template>
 
 <style scoped>

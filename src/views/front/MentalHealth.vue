@@ -2,10 +2,13 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { getMentalHealthRecords, getMentalHealthStats, deleteMentalHealthRecord } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import LoginGate from '@/components/common/LoginGate.vue'
+import { ElMessage } from 'element-plus'
+import { useConfirm } from '@/composables/useConfirm'
 import * as echarts from 'echarts'
 
 const userStore = useUserStore()
+const { confirm } = useConfirm()
 const records = ref([])
 const stats = ref(null)
 const loading = ref(false)
@@ -105,11 +108,8 @@ async function loadData() {
 }
 
 async function handleDelete(record) {
-  try {
-    await ElMessageBox.confirm('确定要删除这条记录吗？', '删除确认', {
-      confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning',
-    })
-  } catch { return }
+  const ok = await confirm('确定要删除这条记录吗？', { title: '删除确认', type: 'warning' })
+  if (!ok) return
   try {
     await deleteMentalHealthRecord(record.id)
     records.value = records.value.filter(r => r.id !== record.id)
@@ -256,15 +256,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="mental-health-page">
-    <div class="page-header">
-      <h2>心理健康记录</h2>
-      <p>追踪情绪变化，了解自己的心理状态</p>
-    </div>
-
-    <div v-if="!userStore.isLoggedIn" class="empty-hint">
-      <span class="empty-icon">&#x1f512;</span>
-      <p>请先登录后查看心理健康记录</p>
-    </div>
+    <LoginGate v-if="!userStore.isLoggedIn" message="登录后即可查看心理健康记录" />
 
     <template v-else>
       <!-- ===== 筛选栏 ===== -->
