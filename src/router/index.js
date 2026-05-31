@@ -34,11 +34,6 @@ const router = createRouter({
           component: () => import('@/views/front/MentalHealth.vue'),
         },
         {
-          path: 'about',
-          name: 'About',
-          component: () => import('@/views/front/About.vue'),
-        },
-        {
           path: 'login',
           name: 'Login',
           component: () => import('@/views/front/Login.vue'),

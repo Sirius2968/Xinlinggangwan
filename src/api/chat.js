@@ -201,20 +201,8 @@ export function updateChatMessage(msgId, content) {
   return request.put(`/chat/message/${msgId}`, { content })
 }
 
-// ============================================================
-// 睡眠追踪 API
-// ============================================================
-
 /**
- * 13. 记录睡眠数据
- *     POST /api/sleep/track
- */
-export function trackSleep(data) {
-  return request.post('/sleep/track', data)
-}
-
-/**
- * 14. 获取心理健康统计数据
+ * 13. 获取心理健康统计数据
  *     GET /api/mental-health/stats
  *     参数: period, emotion_type, start_date, end_date
  */
@@ -223,26 +211,10 @@ export function getMentalHealthStats(params) {
 }
 
 /**
- * 15. 获取心理健康记录列表（带筛选）
+ * 14. 获取心理健康记录列表（带筛选）
  *     GET /api/mental-health/records
  *     参数: period, emotion_type, start_date, end_date
  */
 export function getMentalHealthRecords(params) {
   return request.get('/mental-health/records', { params })
-}
-
-/**
- * 16. 获取睡眠记录列表
- *     GET /api/sleep/records
- */
-export function getSleepRecords() {
-  return request.get('/sleep/records')
-}
-
-/**
- * 15. 删除睡眠记录
- *     DELETE /api/sleep/{record_id}
- */
-export function deleteSleepRecord(recordId) {
-  return request.delete(`/sleep/${recordId}`)
 }
