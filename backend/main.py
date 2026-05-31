@@ -12,6 +12,7 @@ API 文档自动生成:
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from database import engine, Base
 from routers import users, chat, mental_health, sleep, articles
@@ -68,8 +69,20 @@ app.include_router(articles.router)
 
 
 # ============================================================
-# 健康检查
+# 前端静态文件托管（生产模式）
 # ============================================================
-@app.get("/")
-def root():
-    return {"message": "心灵港湾 API 运行中", "version": "1.0"}
+FRONTEND_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dist")
+
+if os.path.isdir(FRONTEND_DIST):
+    from fastapi.responses import FileResponse
+
+    # CSS/JS/图片等静态资源（类如 /assets/index-Dke6wJ7I.js）
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+
+    # SPA 兜底：API 路由未命中 → 尝试匹配文件 → 否则返回 index.html
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        file_path = os.path.join(FRONTEND_DIST, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
