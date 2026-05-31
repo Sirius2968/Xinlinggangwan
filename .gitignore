@@ -35,5 +35,6 @@ coverage
 # Vitest
 __screenshots__/
 
-# Vite
-*.timestamp-*-*.mjs
+# 环境变量（含 API Key）
+.env
+
