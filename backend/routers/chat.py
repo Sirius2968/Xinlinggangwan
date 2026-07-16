@@ -275,16 +275,22 @@ async def send_message_stream(
             db.commit()
 
             if should_trigger_form(body.message, complete):
-                form_state = json.dumps({
-                    "submitted": False,
-                    "ai_context": complete[:500],
-                }, ensure_ascii=False)
-                form_msg = ChatMessage(session_id=session.id, role="form", content=form_state)
-                db.add(form_msg)
-                db.commit()
-                db.refresh(form_msg)
-                event_id += 1
-                yield _sse_event(event_id, {'type': 'form_trigger', 'ai_context': complete[:500], 'msg_id': form_msg.id})
+                # 冷却检查：同一会话中已有 form 消息则不再触发
+                recent_forms = db.query(ChatMessage).filter(
+                    ChatMessage.session_id == session.id,
+                    ChatMessage.role == "form"
+                ).count()
+                if recent_forms == 0:
+                    form_state = json.dumps({
+                        "submitted": False,
+                        "ai_context": complete[:500],
+                    }, ensure_ascii=False)
+                    form_msg = ChatMessage(session_id=session.id, role="form", content=form_state)
+                    db.add(form_msg)
+                    db.commit()
+                    db.refresh(form_msg)
+                    event_id += 1
+                    yield _sse_event(event_id, {'type': 'form_trigger', 'ai_context': complete[:500], 'msg_id': form_msg.id})
 
     return StreamingResponse(
         event_stream(),

@@ -217,8 +217,6 @@ defineExpose({ scrollToBottom })
 
 .msg-bubble {
   @include msg-bubble-base;
-  transform: translateZ(0);   // 提升到独立合成层，避免内容更新时触发大面积重绘
-  contain: layout style;       // 隔离布局计算，防止气泡内容变化影响外部
 
   .msg-user & { background: $color-primary; color: $color-white; border-bottom-right-radius: $radius-sm; }
   .msg-ai & {
@@ -228,10 +226,8 @@ defineExpose({ scrollToBottom })
 
   .msg-ai & { @include md-content; }
 
-  // 流式生成中：加强布局隔离 + 闪烁光标
+  // 流式生成中：闪烁光标
   &.streaming {
-    contain: layout style paint;
-
     &::after {
       content: '|';
       display: inline;
@@ -242,12 +238,13 @@ defineExpose({ scrollToBottom })
     }
   }
 
-  // 未完成缓冲区的纯文本预览（v-html 动态内容，需用 :deep 穿透 scoped）
-  &:deep(.streaming-pending) {
-    opacity: 0.75;
+  // 纯文本降级（语法不稳定时展示，避免隐藏导致高度崩塌和滚动抖动）
+  &:deep(.streaming-plain) {
+    opacity: 0.70;
+    color: $color-text-secondary;
   }
 
-  // 打字指示器（pending 被隐藏时显示，告知用户正在生成）
+  // 打字指示器（无内容时展示）
   &:deep(.typing-indicator) {
     display: inline-flex; gap: 4px; align-items: center;
 

@@ -5,14 +5,15 @@ import {
   submitMentalHealth, updateChatMessage,
 } from '@/api/chat'
 import { formatTime } from '@/utils/time'
+import { hasTrailingUnclosedSyntax } from './markdown'
 
 export const emotionOptions = ['开心', '平静', '充满希望', '感恩', '满足', '放松', '焦虑', '悲伤', '愤怒', '恐惧', '压力', '其他']
 
 /**
- * 创建带时间+RAF双重节流的流式回调包装
- * - RAF 层：合并同一帧内的多个 chunk
- * - 时间层：最少间隔 ~50ms 才 flush，约 20 次/秒
- *   既避免高频 v-html 重渲染，又保持足够平滑的文本增长
+ * 创建带 RAF 节流的流式回调包装
+ * - 合并同一帧内的多个 chunk
+ * - 最少间隔 ~50ms 才 flush，约 20 次/秒
+ * - 纯 RAF 循环，不用 setTimeout 避免与时序冲突
  */
 const MIN_FLUSH_INTERVAL = 50  // ms
 
@@ -22,7 +23,7 @@ function createThrottledCallbacks(raw) {
   let lastFlushTime = 0
 
   function flush() {
-    if (rafId) {
+    if (rafId !== null) {
       cancelAnimationFrame(rafId)
       rafId = null
     }
@@ -34,29 +35,20 @@ function createThrottledCallbacks(raw) {
   }
 
   function scheduleFlush() {
-    if (rafId) return
+    if (rafId !== null) return
     rafId = requestAnimationFrame(() => {
       rafId = null
       const elapsed = performance.now() - lastFlushTime
       if (elapsed >= MIN_FLUSH_INTERVAL) {
-        // 距上次更新已超过阈值，立即 flush
         const text = buffer
         buffer = ''
         if (text) {
           raw.onChunk(text)
           lastFlushTime = performance.now()
         }
-      } else {
-        // 距上次更新太近，推迟到间隔满后再 flush
-        const remaining = MIN_FLUSH_INTERVAL - elapsed
-        setTimeout(() => {
-          const text = buffer
-          buffer = ''
-          if (text) {
-            raw.onChunk(text)
-            lastFlushTime = performance.now()
-          }
-        }, remaining)
+      } else if (buffer) {
+        // 距上次 flush 太近，下一帧再试
+        scheduleFlush()
       }
     })
   }
@@ -159,16 +151,6 @@ export function useChatStream(ctx) {
     scrollToBottomFn.value?.()
   }
 
-  let scrollPending = false
-  function scrollToBottomSmooth() {
-    if (scrollPending) return
-    scrollPending = true
-    requestAnimationFrame(() => {
-      scrollPending = false
-      scrollToBottom()
-    })
-  }
-
   // ============================================================
   // 表单卡片
   // ============================================================
@@ -237,18 +219,43 @@ export function useChatStream(ctx) {
   // 流式回调工厂：为给定对话生成完整回调集（含重连 / 放弃处理）
   // ============================================================
   function buildStreamCallbacks(chatId, convId, state, idempotencyKey) {
+    let pendingBuffer = ''
+    let pendingTimer = null
+    const MAX_BUFFER_DELAY = 200
+
+    function flushBuffer() {
+      if (pendingTimer) {
+        clearTimeout(pendingTimer)
+        pendingTimer = null
+      }
+      if (!pendingBuffer) return
+      const msgs = state.messages
+      const lastMsg = msgs[msgs.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        lastMsg.content += pendingBuffer
+      }
+      pendingBuffer = ''
+      if (activeId.value === convId) {
+        nextTick(() => requestAnimationFrame(() => scrollToBottom()))
+      }
+    }
+
     return createThrottledCallbacks({
       onChunk: (chunk) => {
+        pendingBuffer += chunk
         const msgs = state.messages
         const lastMsg = msgs[msgs.length - 1]
         if (lastMsg && lastMsg.role === 'assistant') {
-          lastMsg.content += chunk
-          if (activeId.value === convId) {
-            nextTick(() => scrollToBottomSmooth())
+          const fullText = lastMsg.content + pendingBuffer
+          if (!hasTrailingUnclosedSyntax(fullText)) {
+            flushBuffer()
+          } else if (!pendingTimer) {
+            pendingTimer = setTimeout(flushBuffer, MAX_BUFFER_DELAY)
           }
         }
       },
       onDone: (content, interrupted) => {
+        flushBuffer()
         resetReconnectState()
         state.loading = false
         chatAbortFns[chatId] = null
@@ -264,20 +271,23 @@ export function useChatStream(ctx) {
         if (activeId.value === convId) {
           loading.value = false
           abortFn.value = null
-          nextTick(() => scrollToBottomSmooth())
+          nextTick(() => scrollToBottom())
         }
       },
       onCorrection: (corrected) => {
+        pendingBuffer = ''
+        if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null }
         const msgs = state.messages
         const lastMsg = msgs[msgs.length - 1]
         if (lastMsg && lastMsg.role === 'assistant') {
           lastMsg.content = corrected
           if (activeId.value === convId) {
-            nextTick(() => scrollToBottomSmooth())
+            nextTick(() => requestAnimationFrame(() => scrollToBottom()))
           }
         }
       },
       onError: (err) => {
+        flushBuffer()
         console.error('SSE 流式错误:', err)
         state.loading = false
         chatAbortFns[chatId] = null
@@ -292,6 +302,7 @@ export function useChatStream(ctx) {
         }
       },
       onCancel: () => {
+        flushBuffer()
         resetReconnectState()
         state.loading = false
         chatAbortFns[chatId] = null
@@ -554,7 +565,6 @@ export function useChatStream(ctx) {
     resetReconnectState,
     // 方法
     scrollToBottom,
-    scrollToBottomSmooth,
     makeFormCard,
     insertFormCard,
     submitFormCard,

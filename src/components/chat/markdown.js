@@ -10,9 +10,6 @@ function _ensureConfigured() {
   }
 }
 
-/**
- * 将 Markdown 文本渲染为安全的 HTML 字符串
- */
 export function renderMarkdown(text, sanitize = true) {
   if (!text) return ''
   _ensureConfigured()
@@ -20,66 +17,87 @@ export function renderMarkdown(text, sanitize = true) {
   return sanitize ? DOMPurify.sanitize(raw) : raw
 }
 
-/**
- * 转义 HTML 特殊字符
- */
 export function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 // ============================================================
-// 末尾未闭合语法检测
+// 纯文本降级：去除 markdown 语法字符，保留下划线文字
+// ============================================================
+function _stripMarkdownSyntax(text) {
+  return text
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/__/g, '')
+    .replace(/~~/g, '')
+    .replace(/`/g, '')
+    .replace(/^#{1,6}\s/gm, '')
+}
+
+// ============================================================
+// 综合未闭合语法检测（GFM 常用内联语法全覆盖）
 // ============================================================
 
-function _hasTrailingUnclosedSyntax(text) {
-  if (!text) return false
-  const tail = text.slice(-80)
+function _unpaired(regex, text) {
+  return [...text.matchAll(regex)].length % 2 !== 0
+}
 
-  const starsDbl = [...tail.matchAll(/\*\*/g)].length
-  if (starsDbl % 2 !== 0) {
+export function hasTrailingUnclosedSyntax(text) {
+  if (!text) return false
+  const tail = text.slice(-120)
+
+  // ** 粗体
+  if (_unpaired(/\*\*/g, tail)) {
     const idx = tail.lastIndexOf('**')
     if (idx === -1 || !tail.slice(idx + 2).includes('**')) return true
   }
 
-  const tripleTicks = [...tail.matchAll(/```/g)].length
-  const allTicks = [...tail.matchAll(/`/g)].length
-  const singleTicks = allTicks - tripleTicks * 3
-  if (singleTicks % 2 !== 0) return true
-  if (tripleTicks % 2 !== 0) return true
+  // * 斜体（排除 ** 组成部分）
+  if (_unpaired(/(?<!\*)\*(?!\*)/g, tail)) return true
 
+  // __ 粗体（下划线）
+  if (_unpaired(/__/g, tail)) {
+    const idx = tail.lastIndexOf('__')
+    if (idx === -1 || !tail.slice(idx + 2).includes('__')) return true
+  }
+
+  // _ 斜体（排除 __ 组成部分）
+  if (_unpaired(/(?<!_)_(?!_)/g, tail)) return true
+
+  // ~~ 删除线
+  if (_unpaired(/~~/g, tail)) return true
+
+  // ``` 代码块
+  if (_unpaired(/```/g, tail)) return true
+
+  // ` 行内代码（排除 ``` 组成部分）
+  const allTicks = [...tail.matchAll(/`/g)].length
+  const fenceTicks = [...tail.matchAll(/```/g)].length * 3
+  if ((allTicks - fenceTicks) % 2 !== 0) return true
+
+  // [text](url 未闭合链接
   if (/\[[^\]]*\]\([^)]*$/.test(tail)) return true
 
   return false
 }
 
 // ============================================================
-// 块级增量渲染
+// 块切分（\n\n 分隔，``` 代码块边界感知）
 // ============================================================
 
-/**
- * 用 \n\n 切分段落，同时处理 \r\n 和 ``` 代码块边界。
- *
- * 返回 { completed, pending }：
- * - completed: 已确认完整的段落文本数组（可送 marked 渲染）
- * - pending:   末尾未完成的段落（可能为空字符串）
- */
 function _splitBlocks(text) {
-  // 统一换行符
   const normalized = text.replace(/\r\n/g, '\n')
 
-  // ---- 定位所有 ``` 位置 ----
   const fencePositions = []
   let idx = -1
   while ((idx = normalized.indexOf('```', idx + 1)) !== -1) {
     fencePositions.push(idx)
   }
 
-  // 代码块未闭合（奇数个 ```）→ 最后一个 ``` 之后的内容不可切分
   if (fencePositions.length % 2 !== 0) {
     const lastFence = fencePositions[fencePositions.length - 1]
     const before = normalized.slice(0, lastFence)
     const fromFence = normalized.slice(lastFence)
-
     const parts = before.split('\n\n')
     if (parts.length > 1) {
       return {
@@ -87,11 +105,9 @@ function _splitBlocks(text) {
         pending: (parts[parts.length - 1] || '') + fromFence,
       }
     }
-    // before 没有可切分段，全部归入 pending
     return { completed: [], pending: normalized }
   }
 
-  // 所有代码块已闭合，正常按 \n\n 切分
   const parts = normalized.split('\n\n')
   if (parts.length > 1) {
     return {
@@ -107,21 +123,15 @@ function _splitBlocks(text) {
 // 消息级缓存 & getBubbleHtml
 // ============================================================
 
-// 已完成消息的渲染缓存
 const _cache = new WeakMap()
-
-// 流式消息上的解析状态（WeakMap 避免污染响应式对象）
 const _stateMap = new WeakMap()
 
 function _getState(msg) {
   let s = _stateMap.get(msg)
   if (!s) {
     s = {
-      /** @type {Map<string, string>} block 文本 → marked 渲染 HTML 缓存 */
       blockCache: new Map(),
-      /** @type {string[]} 已确认完成的 block 文本 */
       completedTexts: [],
-      /** @type {string} 已拼接好的完成块 HTML */
       completedHtml: '',
     }
     _stateMap.set(msg, s)
@@ -129,26 +139,17 @@ function _getState(msg) {
   return s
 }
 
-/**
- * 获取消息气泡的 HTML：
- * - 用户消息 → 纯文本
- * - AI 流式消息 → 块级增量：已完成块用 marked 渲染（缓存），
- *   未完成块仅在语法稳定时走 marked，否则用纯文本占位
- * - AI 已完成消息 → 全量 marked + DOMPurify + 缓存
- */
 export function getBubbleHtml(msg, index, isLoading, lastIndex) {
   if (!msg.content) return ''
   if (msg.role === 'user') return escapeHtml(msg.content).replace(/\n/g, '<br>')
 
-  // ---- 流式生成中的最后一条：块级增量渲染 ----
+  // ---- 流式最后一条：块级增量渲染 ----
   if (isLoading && index === lastIndex) {
     const text = msg.content
     const state = _getState(msg)
-
-    // 按 \n\n 切分
     const { completed, pending } = _splitBlocks(text)
 
-    // ---- 已完成块：增量渲染（新块才走 marked） ----
+    // 已完成块：增量 marked 渲染 + 缓存
     if (completed.length > state.completedTexts.length) {
       for (let i = state.completedTexts.length; i < completed.length; i++) {
         const blockText = completed[i]
@@ -162,20 +163,20 @@ export function getBubbleHtml(msg, index, isLoading, lastIndex) {
       state.completedTexts = completed
     }
 
-    // ---- 未完成块（pending） ----
+    // 未完成块（pending）：语法稳定时 marked 渲染，不稳定时纯文本降级
     let pendingHtml = ''
     if (pending) {
-      if (_hasTrailingUnclosedSyntax(pending)) {
-        // 语法不稳定 → 完全隐藏，等语法闭合后再出现
-        // 绝不显示原始 markdown 字符（**, `, ```, [text](url）
-        // 如果没有任何已完成块，下方会追加一个打字指示器
-      } else {
-        // 语法稳定 → 直接走 marked（结构不会再突变）
+      if (!hasTrailingUnclosedSyntax(pending)) {
         pendingHtml = renderMarkdown(pending, false)
+      } else {
+        // 纯文本降级：保持高度稳定，避免滚动抖动
+        const plain = _stripMarkdownSyntax(pending).trim()
+        if (plain) {
+          pendingHtml = '<span class="streaming-plain">' + escapeHtml(plain) + '</span>'
+        }
       }
     }
 
-    // 没有已完成块且 pending 被隐藏 → 显示打字指示器，让用户知道正在生成
     if (!state.completedHtml && !pendingHtml) {
       return '<span class="typing-indicator"><i></i><i></i><i></i></span>'
     }
@@ -183,7 +184,7 @@ export function getBubbleHtml(msg, index, isLoading, lastIndex) {
     return state.completedHtml + pendingHtml
   }
 
-  // ---- 已完成消息：清理流式状态，走全量缓存 ----
+  // ---- 已完成消息 ----
   if (_stateMap.has(msg)) {
     _stateMap.delete(msg)
   }
