@@ -4,14 +4,20 @@ import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
 // ============================================================
-// CDN 外部化：生产构建时走 CDN，通过 Import Map 让浏览器解析裸模块
+// CDN 配置
+// CDN_BASE_URL: 生产构建时的静态资源 CDN 地址
+//   示例: https://cdn.example.com/assets/
+//   留空则使用相对路径，由 nginx 直接托管
 // ============================================================
-const CDN_EXTERNALS = ['vue', 'vue-router', 'pinia', 'element-plus', 'axios', 'echarts']
+const CDN_BASE_URL = process.env.CDN_BASE_URL || '/'
 
-/**
- * ESM 格式的 CDN 地址
- * esm.sh 自动将 npm 包转为浏览器 ESM，国内不通可换成 jsdelivr
- */
+// ============================================================
+// CDN 外部化依赖（esm.sh / jsdelivr）
+//   启用后 Vue/Router/Pinia 等第三方库从 CDN 加载，不进 bundle
+//   可减少构建体积，加速首次访问
+// ============================================================
+const ENABLE_CDN_EXTERNAL = process.env.CDN_EXTERNAL === 'true'
+
 const IMPORT_MAP = {
   vue: 'https://esm.sh/vue@3.5',
   'vue-router': 'https://esm.sh/vue-router@4',
@@ -21,9 +27,6 @@ const IMPORT_MAP = {
   echarts: 'https://esm.sh/echarts@5',
 }
 
-/**
- * 构建时注入 <script type="importmap">，告诉浏览器去哪找外部模块
- */
 function importMapPlugin() {
   return {
     name: 'vite-importmap-cdn',
@@ -45,17 +48,16 @@ function importMapPlugin() {
   }
 }
 
-// https://vite.dev/config/
 export default defineConfig({
+  base: CDN_BASE_URL,
   plugins: [
     vue(),
     vueDevTools(),
-    // CDN 模式仅适合海外部署，国内/本地关闭更优
-    // importMapPlugin(),
+    ...(ENABLE_CDN_EXTERNAL ? [importMapPlugin()] : []),
   ],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
   server: {
@@ -67,21 +69,23 @@ export default defineConfig({
     },
   },
   build: {
+    // 静态资源使用内容哈希命名，利于 CDN 长效缓存
+    assetsInlineLimit: 4096,
     rollupOptions: {
       output: {
+        // 入口 chunk 名带哈希
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]',
         manualChunks(id) {
-          // echarts 超大（1MB+），只有心理健康页面用，单独拆出按需加载
           if (id.includes('node_modules/echarts')) return 'echarts'
-          // element-plus 组件按页面拆，避免首屏全量加载
           if (id.includes('node_modules/element-plus')) {
-            // 按组件目录分组，减少单个 chunk 体积
             if (id.includes('/es/components/')) return 'vendor/element-ui'
             return 'vendor/element-core'
           }
         },
       },
     },
-    // 小于此阈值的模块不单独拆 chunk，减少 HTTP 请求数
     cssMinify: true,
   },
 })

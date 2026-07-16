@@ -5,7 +5,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import get_db
-from models import SharedArticle, User, ArticleFavorite
+from models import SharedArticle, User, ArticleFavorite, KnowledgeArticle, KnowledgeFavorite
 from schemas import ArticleRequest, ok, fail
 from auth import get_current_user
 
@@ -177,3 +177,88 @@ def toggle_favorite(
             article.favorite_count = (article.favorite_count or 0) + 1
     db.commit()
     return ok({"favorite_count": article.favorite_count})
+
+
+# ============================================================
+# 系统知识文章（从 Pinia 迁移至数据库渲染）
+# ============================================================
+
+def _format_knowledge_article(a, fav_ids: set):
+    return {
+        "id": a.id,
+        "title": a.title,
+        "summary": a.summary,
+        "content": a.content,
+        "category": a.category,
+        "tags": [t.strip() for t in (a.tags or "").split(",") if t.strip()],
+        "readTime": a.read_time or "4分钟",
+        "icon": a.icon or "",
+        "isFavorited": a.id in fav_ids,
+    }
+
+
+@router.get("/knowledge")
+def list_knowledge_articles(
+    user: dict | None = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取系统知识文章列表（分类筛选、搜索由前端处理）"""
+    articles = db.query(KnowledgeArticle).order_by(KnowledgeArticle.id).all()
+    fav_ids = set()
+    if user:
+        rows = (
+            db.query(KnowledgeFavorite)
+            .filter(KnowledgeFavorite.user_id == user.get("user_id"))
+            .all()
+        )
+        fav_ids = {r.article_id for r in rows}
+    return ok([_format_knowledge_article(a, fav_ids) for a in articles])
+
+
+@router.get("/knowledge/favorites")
+def get_knowledge_favorites(
+    user: dict | None = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取当前用户收藏的知识文章 ID 列表（需要登录）"""
+    if not user:
+        return fail(401, "请先登录")
+    rows = (
+        db.query(KnowledgeFavorite)
+        .filter(KnowledgeFavorite.user_id == user.get("user_id"))
+        .all()
+    )
+    return ok([r.article_id for r in rows])
+
+
+@router.post("/knowledge/{article_id}/favorite")
+def toggle_knowledge_favorite(
+    article_id: int,
+    action: str = "add",
+    user: dict | None = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """收藏/取消收藏知识文章（需要登录，按账号隔离）"""
+    if not user:
+        return fail(401, "请先登录")
+
+    article = db.query(KnowledgeArticle).filter(KnowledgeArticle.id == article_id).first()
+    if not article:
+        return fail(404, "文章不存在")
+
+    uid = user.get("user_id")
+    existing = (
+        db.query(KnowledgeFavorite)
+        .filter(KnowledgeFavorite.user_id == uid, KnowledgeFavorite.article_id == article_id)
+        .first()
+    )
+
+    if action == "remove":
+        if existing:
+            db.delete(existing)
+    else:
+        if not existing:
+            fav = KnowledgeFavorite(user_id=uid, article_id=article_id)
+            db.add(fav)
+    db.commit()
+    return ok({"is_favorited": action != "remove"})

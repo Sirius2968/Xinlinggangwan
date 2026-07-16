@@ -186,6 +186,4 @@ npm run dev                   # 启动在 http://localhost:5173
 npm run test:unit             # Vitest 单元测试
 npm run lint                  # ESLint + Oxlint 代码检查
 npm run format                # Prettier 格式化
-
-http://123.57.59.63/
 ```

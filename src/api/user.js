@@ -2,20 +2,23 @@ import request from '@/utils/request'
 
 /**
  * 用户注册
- * @param {Object} data - { phone, password, confirmPassword }
- * @returns {Promise} 后端返回的响应数据
  */
 export function register(data) {
   return request.post('/user/register', data)
 }
 
 /**
- * 用户登录
- * @param {Object} data - { phone, password }
- * @returns {Promise} 登录成功后返回 token 和用户信息
+ * 用户登录 —— 返回 access_token + refresh_token
  */
 export function login(data) {
   return request.post('/user/login', data)
+}
+
+/**
+ * 刷新令牌
+ */
+export function refreshToken(data) {
+  return request.post('/user/refresh', data)
 }
 
 /**
@@ -34,7 +37,6 @@ export function getUserInfo() {
 
 /**
  * 修改用户信息
- * @param {Object} data - 要修改的字段
  */
 export function updateUser(data) {
   return request.put('/user/update', data)
@@ -42,7 +44,6 @@ export function updateUser(data) {
 
 /**
  * 修改密码
- * @param {Object} data - { oldPassword, newPassword }
  */
 export function updatePassword(data) {
   return request.put('/user/updatePwd', data)

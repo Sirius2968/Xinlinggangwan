@@ -65,13 +65,16 @@ function goTo(route) {
     <div class="carousel-wrapper" @mouseenter="pauseCarousel" @mouseleave="resumeCarousel">
       <el-carousel ref="carouselRef" height="500px" :interval="4000" arrow="always">
         <el-carousel-item v-for="n in 5" :key="n">
-          <img
-            :src="`/images/carousel/${n}.jpg`"
-            :alt="`轮播图 ${n}`"
-            class="slide-img"
-            :loading="n === 1 ? undefined : 'lazy'"
-            decoding="async"
-          />
+          <picture>
+            <source :srcset="`/images/carousel/${n}.webp`" type="image/webp" />
+            <img
+              :src="`/images/carousel/${n}.jpg`"
+              :alt="`轮播图 ${n}`"
+              class="slide-img"
+              :loading="n === 1 ? undefined : 'lazy'"
+              decoding="async"
+            />
+          </picture>
         </el-carousel-item>
       </el-carousel>
       <div class="hero-overlay">

@@ -1,22 +1,37 @@
 """
-JWT 令牌处理
+JWT 双令牌处理 —— 访问令牌（15分钟）+ 刷新令牌（14天）
 """
 
+import os
 import jwt
 from datetime import datetime, timedelta
 from fastapi import Header, HTTPException
 
-SECRET_KEY = "xinling-gangwan-secret-key-2026"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "xinling-gangwan-secret-key-2026")
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 72
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
+REFRESH_TOKEN_EXPIRE_DAYS = 14
 
 
-def create_token(user_id: int, username: str) -> str:
-    """生成 JWT 令牌"""
+def create_access_token(user_id: int, username: str) -> str:
+    """生成短期访问令牌（15分钟）"""
     payload = {
         "user_id": user_id,
         "username": username,
-        "exp": datetime.utcnow() + timedelta(hours=TOKEN_EXPIRE_HOURS),
+        "type": "access",
+        "exp": datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        "iat": datetime.utcnow(),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_refresh_token(user_id: int, username: str) -> str:
+    """生成长期刷新令牌（14天）"""
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "type": "refresh",
+        "exp": datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         "iat": datetime.utcnow(),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
@@ -39,7 +54,13 @@ def get_current_user(authorization: str = Header(default="")) -> dict | None:
     token = authorization.replace("Bearer ", "").strip()
     if not token:
         return None
-    return decode_token(token)
+    payload = decode_token(token)
+    if not payload:
+        return None
+    # 仅接受 access token，拒绝 refresh token 用于鉴权
+    if payload.get("type") != "access":
+        return None
+    return payload
 
 
 def require_user(authorization: str = Header(default="")):

@@ -111,3 +111,29 @@ class ArticleFavorite(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User")
+
+
+class KnowledgeArticle(Base):
+    """心理知识科普文章（系统内置）"""
+    __tablename__ = "knowledge_articles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), nullable=False)
+    summary = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
+    category = Column(String(50), nullable=False, index=True)
+    tags = Column(String(500), default="")       # 逗号分隔
+    read_time = Column(String(20), default="4分钟")
+    icon = Column(String(10), default="")
+
+
+class KnowledgeFavorite(Base):
+    """知识文章收藏关联表 —— 记录用户收藏了哪些系统知识文章"""
+    __tablename__ = "knowledge_favorites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    article_id = Column(Integer, ForeignKey("knowledge_articles.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")

@@ -45,7 +45,7 @@ const router = createRouter({
 
 // 已登录状态下访问登录页 → 直接跳首页
 router.beforeEach((to) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token')
   if (to.name === 'Login' && token) {
     return { name: 'Home' }
   }

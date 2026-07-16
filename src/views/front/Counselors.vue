@@ -3,9 +3,18 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConfirm } from '@/composables/useConfirm'
-import { createChat, sendMessageStream, getChatHistory, listChats, deleteChat, renameChat, clearAllChats, submitMentalHealth, updateChatMessage } from '@/api/chat'
+import { createChat, sendMessageStream, getChatHistory, listChats, deleteChat, renameChat, clearAllChats, submitMentalHealth, updateChatMessage, regenerateMessage } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
+import { marked } from 'marked'
 import LoginGate from '@/components/common/LoginGate.vue'
+
+// 配置 marked
+marked.setOptions({ breaks: true, gfm: true })
+
+function renderMarkdown(text) {
+  if (!text) return ''
+  return marked.parse(text)
+}
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -94,6 +103,9 @@ const inputText = ref('')
 const loading = ref(false)
 const abortFn = ref(null)
 const chatArea = ref(null)
+const hoveredMsgIndex = ref(-1)
+const showDevPanel = ref(false)
+const devEvents = ref([])  // 当前流式会话中收集的工具/MCP事件
 
 // ============================================================
 // A2UI 心理健康表单（对话内嵌，非弹窗）
@@ -370,6 +382,9 @@ function handleSend() {
 
   nextTick(() => scrollToBottom())
 
+  // 重置开发者面板事件
+  devEvents.value = []
+
   abortFn.value = sendMessageStream(conv.chatId, text, {
     onChunk: (chunk) => {
       const lastMsg = messages.value[messages.value.length - 1]
@@ -412,6 +427,9 @@ function handleSend() {
       console.log('收到 form_trigger 事件, ai_context:', aiContext?.slice(0, 50), 'msgId:', msgId)
       insertFormCard(aiContext, msgId)
     },
+    onToolEvent: (type, payload) => {
+      devEvents.value.push({ type, ...payload, time: Date.now() })
+    },
   })
 }
 
@@ -426,6 +444,89 @@ function stopGeneration() {
   loading.value = false
   // 保留已生成内容，存入 localStorage
   saveDraftToLocal()
+}
+
+/** 复制 AI 消息的 Markdown 原文 */
+async function copyMarkdown(msg) {
+  try {
+    await navigator.clipboard.writeText(msg.content || '')
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+/** 重新生成：删除最后一条 AI 回复，用上一条用户消息重新请求 */
+async function handleRegenerate(msgIndex) {
+  const conv = conversations.value.find((c) => c.id === activeId.value)
+  if (!conv || !conv.chatId) {
+    ElMessage.error('会话未创建成功')
+    return
+  }
+  try {
+    const res = await regenerateMessage(conv.chatId)
+    const triggerMsg = (res.data?.trigger_message) || (res.trigger_message)
+    if (!triggerMsg) {
+      ElMessage.error('没有找到可重新生成的消息')
+      return
+    }
+    // 删除本地消息列表中的最后一条 AI 消息
+    messages.value.splice(msgIndex, 1)
+    // 插入空的 AI 消息占位，供流式填充
+    addMessage('assistant', '')
+    loading.value = true
+    devEvents.value = []
+
+    // 重新发起 SSE 流式请求
+    abortFn.value = sendMessageStream(conv.chatId, triggerMsg, {
+      onChunk: (chunk) => {
+        const lastMsg = messages.value[messages.value.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant') {
+          lastMsg.content += chunk
+          nextTick(() => scrollToBottomSmooth())
+        }
+      },
+      onDone: () => {
+        loading.value = false
+        abortFn.value = null
+        clearDraft()
+        const lastMsg = messages.value[messages.value.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.content) {
+          lastMsg.content = '抱歉，我暂时无法回复。'
+        }
+        nextTick(() => scrollToBottomSmooth())
+      },
+      onCorrection: (corrected) => {
+        const lastMsg = messages.value[messages.value.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant') {
+          lastMsg.content = corrected
+          nextTick(() => scrollToBottomSmooth())
+        }
+      },
+      onError: (err) => {
+        console.error('SSE 流式错误:', err)
+        loading.value = false
+        abortFn.value = null
+        const lastMsg = messages.value[messages.value.length - 1]
+        if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.content) {
+          lastMsg.content = '抱歉，服务暂时不可用，请稍后再试。'
+        }
+      },
+      onCancel: () => {
+        loading.value = false
+        abortFn.value = null
+      },
+      onFormTrigger: (aiContext, msgId) => {
+        insertFormCard(aiContext, msgId)
+      },
+      onToolEvent: (type, payload) => {
+        devEvents.value.push({ type, ...payload, time: Date.now() })
+      },
+    })
+  } catch (err) {
+    console.error('regenerate 失败:', err)
+    ElMessage.error('重新生成失败，请稍后重试')
+  }
 }
 
 function scrollToBottom() {
@@ -500,6 +601,42 @@ onBeforeUnmount(() => {
 
     <!-- ======== 右侧聊天区 ======== -->
     <div class="chat-main">
+      <!-- 开发者面板 -->
+      <div class="dev-panel-bar">
+        <button class="dev-toggle" :class="{ active: showDevPanel }" @click="showDevPanel = !showDevPanel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
+          </svg>
+          <span>开发者</span>
+          <span v-if="devEvents.length" class="dev-badge">{{ devEvents.length }}</span>
+        </button>
+      </div>
+      <div v-if="showDevPanel" class="dev-panel">
+        <div class="dev-panel-header">
+          <span>工具调用 & MCP 事件</span>
+          <button class="dev-panel-close" @click="showDevPanel = false">&times;</button>
+        </div>
+        <div class="dev-panel-body">
+          <template v-if="devEvents.length === 0">
+            <p class="dev-empty">暂无工具调用事件。发送消息触发工具调用后将在此显示。</p>
+          </template>
+          <div
+            v-for="(ev, i) in devEvents"
+            :key="i"
+            class="dev-event"
+            :class="'ev-' + ev.type"
+          >
+            <span class="ev-time">{{ new Date(ev.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</span>
+            <span class="ev-type-badge">{{ ev.type === 'mcp_event' ? 'MCP搜索' : ev.type === 'tool_call' ? '工具调用' : '工具结果' }}</span>
+            <span class="ev-name">{{ ev.name }}</span>
+            <span v-if="ev.ok !== undefined" class="ev-status" :class="{ ok: ev.ok, fail: !ev.ok }">{{ ev.ok ? '成功' : '失败' }}</span>
+            <span v-if="ev.query" class="ev-detail">查询: {{ ev.query }}</span>
+            <span v-if="ev.args" class="ev-detail">参数: {{ JSON.stringify(ev.args) }}</span>
+            <span v-if="ev.error" class="ev-detail ev-error">错误: {{ ev.error }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- 没有对话或未选中：引导创建 -->
       <div v-if="displayMode === 'empty'" class="chat-empty">
         <span class="empty-emoji">💬</span>
@@ -562,16 +699,43 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 普通消息 -->
-          <div v-else class="message-row" :class="msg.role === 'user' ? 'msg-user' : 'msg-ai'">
+          <div
+            v-else
+            class="message-row"
+            :class="msg.role === 'user' ? 'msg-user' : 'msg-ai'"
+            @mouseenter="msg.role === 'assistant' && msg.content ? hoveredMsgIndex = i : null"
+            @mouseleave="hoveredMsgIndex = -1"
+          >
             <div class="msg-avatar">
               {{ msg.role === 'user' ? '👤' : '🤖' }}
             </div>
             <div class="msg-body">
-              <div class="msg-bubble" :class="{ typing: msg.role === 'assistant' && !msg.content }">
-                <template v-if="msg.content">{{ msg.content }}</template>
-                <template v-else>
-                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-                </template>
+              <div
+                class="msg-bubble"
+                :class="{ typing: msg.role === 'assistant' && !msg.content }"
+                v-html="msg.role === 'assistant' && msg.content ? renderMarkdown(msg.content) : msg.content"
+                v-if="msg.content"
+              ></div>
+              <div v-else class="msg-bubble typing">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              </div>
+              <!-- AI 消息 hover 操作按钮 -->
+              <div
+                v-if="msg.role === 'assistant' && msg.content && hoveredMsgIndex === i && !loading"
+                class="msg-actions"
+              >
+                <button class="msg-action-btn" title="复制 Markdown" @click="copyMarkdown(msg)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  <span>复制</span>
+                </button>
+                <button class="msg-action-btn" title="重新生成" @click="handleRegenerate(i)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                  </svg>
+                  <span>重新生成</span>
+                </button>
               </div>
               <span class="msg-time">{{ msg.time }}</span>
             </div>
@@ -861,6 +1025,43 @@ onBeforeUnmount(() => {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
+/* Markdown 内容样式 */
+.msg-ai .msg-bubble :deep(h1),
+.msg-ai .msg-bubble :deep(h2),
+.msg-ai .msg-bubble :deep(h3) {
+  margin: 12px 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+.msg-ai .msg-bubble :deep(p) { margin: 4px 0; }
+.msg-ai .msg-bubble :deep(ul),
+.msg-ai .msg-bubble :deep(ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.msg-ai .msg-bubble :deep(li) { margin: 2px 0; line-height: 1.6; }
+.msg-ai .msg-bubble :deep(strong) { color: #2c3e50; font-weight: 600; }
+.msg-ai .msg-bubble :deep(hr) {
+  border: none;
+  border-top: 1px solid #ebeef5;
+  margin: 12px 0;
+}
+.msg-ai .msg-bubble :deep(code) {
+  background: #f5f7fa;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.msg-ai .msg-bubble :deep(blockquote) {
+  border-left: 3px solid #409eff;
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: #606266;
+  background: #f8fbff;
+  border-radius: 0 6px 6px 0;
+}
+
 .msg-time {
   font-size: 12px;
   color: #c0c4cc;
@@ -1003,6 +1204,204 @@ onBeforeUnmount(() => {
   font-size: 14px;
   color: #67c23a;
   padding: 8px 0;
+}
+
+/* ---- AI 消息 hover 操作按钮 ---- */
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  animation: fadeInUp 0.15s ease-out;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #fff;
+  color: #606266;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.msg-action-btn:hover {
+  background: #f0f2f5;
+  border-color: #c0c4cc;
+  color: #303133;
+}
+
+/* ---- 开发者面板 ---- */
+.dev-panel-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 16px;
+  border-bottom: 1px solid #ebeef5;
+  background: #fafafa;
+}
+
+.dev-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #fff;
+  color: #909399;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dev-toggle:hover {
+  color: #606266;
+  border-color: #c0c4cc;
+}
+
+.dev-toggle.active {
+  color: #409eff;
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.dev-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #409eff;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dev-panel {
+  border-bottom: 1px solid #ebeef5;
+  background: #fafafa;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.dev-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.dev-panel-close {
+  border: none;
+  background: none;
+  font-size: 18px;
+  color: #909399;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.dev-panel-body {
+  padding: 8px 16px;
+}
+
+.dev-empty {
+  color: #c0c4cc;
+  font-size: 13px;
+  text-align: center;
+  padding: 16px 0;
+  margin: 0;
+}
+
+.dev-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed #ebeef5;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.dev-event:last-child {
+  border-bottom: none;
+}
+
+.ev-time {
+  color: #c0c4cc;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.ev-type-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ev-mcp_event .ev-type-badge {
+  background: #e6f7ff;
+  color: #1890ff;
+}
+
+.ev-tool_call .ev-type-badge {
+  background: #fff7e6;
+  color: #fa8c16;
+}
+
+.ev-tool_result .ev-type-badge {
+  background: #f6ffed;
+  color: #52c41a;
+}
+
+.ev-name {
+  color: #303133;
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.ev-status {
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.ev-status.ok {
+  color: #52c41a;
+  background: #f6ffed;
+}
+
+.ev-status.fail {
+  color: #ff4d4f;
+  background: #fff2f0;
+}
+
+.ev-detail {
+  color: #909399;
+  font-size: 11px;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ev-error {
+  color: #ff4d4f;
 }
 
 /* ===== PC端小窗口适配（窗口缩窄时不出现横向滚动条） ===== */

@@ -3,21 +3,54 @@ import { ElMessage } from 'element-plus'
 
 // ============================================================
 // 创建 axios 实例
-// baseURL 指向后端服务地址，开发环境通过 Vite 代理转发
 // ============================================================
 const request = axios.create({
-  baseURL: '/api',        // 所有请求自动加上 /api 前缀
-  timeout: 10000,         // 10 秒超时，超时自动取消请求
+  baseURL: '/api',
+  timeout: 10000,
 })
 
 // 缓存 token，避免每次请求都同步读取 localStorage
-let cachedToken = localStorage.getItem('token') || ''
+let cachedToken = localStorage.getItem('access_token') || ''
 export function setAuthToken(token) {
   cachedToken = token || ''
 }
 
 // ============================================================
-// 请求拦截器 —— 发请求之前做的事
+// 刷新令牌逻辑
+// ============================================================
+let isRefreshing = false
+let pendingRequests = []  // 等待刷新的请求队列
+
+function onRefreshed(newToken) {
+  pendingRequests.forEach((cb) => cb(newToken))
+  pendingRequests = []
+}
+
+function addPendingRequest(cb) {
+  pendingRequests.push(cb)
+}
+
+async function tryRefreshToken() {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return null
+
+  try {
+    const res = await axios.post('/api/user/refresh', { refresh_token: refreshToken })
+    if (res.data?.code === 200) {
+      const { access_token, refresh_token } = res.data.data
+      localStorage.setItem('access_token', access_token)
+      localStorage.setItem('refresh_token', refresh_token)
+      setAuthToken(access_token)
+      return access_token
+    }
+  } catch {
+    // 刷新失败
+  }
+  return null
+}
+
+// ============================================================
+// 请求拦截器
 // ============================================================
 request.interceptors.request.use(
   (config) => {
@@ -27,46 +60,79 @@ request.interceptors.request.use(
     if (import.meta.env.DEV) {
       console.log('>>> 请求:', config.method?.toUpperCase(), config.baseURL + config.url, config.data ? JSON.stringify(config.data) : '')
     }
-    return config // 必须返回 config，否则请求发不出去
+    return config
   },
   (error) => {
-    // 请求还没发出去就报错了（比如网络断开）
     return Promise.reject(error)
   },
 )
 
 // ============================================================
-// 响应拦截器 —— 收到响应之后做的事
+// 响应拦截器 —— 含自动刷新令牌
 // ============================================================
 request.interceptors.response.use(
   (response) => {
     const res = response.data
-
-    // 1. 如果后端返回了 code 字段，按 code 判断成败
-    // 注意：code 可能是数字 200 也可能是字符串 "200"，统一转数字比较
     if (res && res.code !== undefined) {
       const code = Number(res.code)
       const successCodes = [200, 1, 0]
       if (successCodes.includes(code)) {
         return res
       }
-      // code 不在成功列表中 → 真正的业务错误
       console.error('业务错误，后端返回 code:', res.code, '完整响应:', JSON.stringify(res))
       ElMessage.error(res.msg || res.message || '请求失败')
       return Promise.reject(new Error(res.msg || res.message || '请求失败'))
     }
-
-    // 2. 没有 code 字段 → HTTP 2xx 就视为成功，直接把整个 body 返回
     return res
   },
-  (error) => {
-    // HTTP 层面的错误（404、500、网络断开等）
+  async (error) => {
     const status = error.response?.status
     const body = error.response?.data
+    const originalRequest = error.config
+
+    // 401 自动尝试刷新令牌（排除刷新接口自身和登录接口）
+    if (status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/user/refresh')) {
+      if (!isRefreshing) {
+        isRefreshing = true
+        const newToken = await tryRefreshToken()
+        isRefreshing = false
+
+        if (newToken) {
+          onRefreshed(newToken)
+          originalRequest.headers.Authorization = 'Bearer ' + newToken
+          originalRequest._retry = true
+          return request(originalRequest)
+        }
+
+        // 刷新失败 → 清空状态跳登录
+        onRefreshed(null)
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('userInfo')
+        setAuthToken('')
+        ElMessage.error('登录已过期，请重新登录')
+        window.location.href = '/login'
+        return Promise.reject(error)
+      }
+
+      // 已有刷新进行中，将请求排入队列
+      return new Promise((resolve) => {
+        addPendingRequest((newToken) => {
+          if (newToken) {
+            originalRequest.headers.Authorization = 'Bearer ' + newToken
+            originalRequest._retry = true
+            resolve(request(originalRequest))
+          } else {
+            resolve(Promise.reject(error))
+          }
+        })
+      })
+    }
 
     switch (status) {
       case 401:
-        localStorage.removeItem('token')
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
         ElMessage.error(body?.msg || '登录已过期，请重新登录')
         window.location.href = '/login'
         break

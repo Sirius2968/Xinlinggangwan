@@ -4,9 +4,9 @@ from database import get_db
 from models import User
 from schemas import (
     RegisterRequest, LoginRequest, UpdateUserRequest, UpdatePasswordRequest,
-    ok, fail,
+    RefreshTokenRequest, ok, fail,
 )
-from auth import create_token, get_current_user
+from auth import create_access_token, create_refresh_token, decode_token, get_current_user
 import bcrypt
 
 router = APIRouter(prefix="/api/user", tags=["用户"])
@@ -65,10 +65,12 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     if not user or not _check_pw(body.password, user.password_hash):
         return fail(400, "用户名或密码错误")
 
-    token = create_token(user.id, user.username)
+    access_token = create_access_token(user.id, user.username)
+    refresh_token = create_refresh_token(user.id, user.username)
 
     return ok({
-        "token": token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "userInfo": {
             "id": user.id,
             "username": user.username,
@@ -162,6 +164,22 @@ def update_password(
     db.commit()
 
     return ok(None, "密码修改成功")
+
+
+@router.post("/refresh")
+def refresh_token(body: RefreshTokenRequest):
+    """使用刷新令牌获取新的访问令牌"""
+    payload = decode_token(body.refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        return fail(401, "刷新令牌无效或已过期")
+
+    new_access_token = create_access_token(payload["user_id"], payload["username"])
+    new_refresh_token = create_refresh_token(payload["user_id"], payload["username"])
+
+    return ok({
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+    })
 
 
 @router.post("/logout")

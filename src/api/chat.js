@@ -28,9 +28,10 @@ export function sendMessage(chatId, message) {
  *    onDone 在流正常结束时调用，onError 在异常时调用。
  *    返回 abort 函数，可用于中断请求。
  */
-export function sendMessageStream(chatId, message, { onChunk, onDone, onError, onCorrection, onCancel, onFormTrigger }) {
+export function sendMessageStream(chatId, message, { onChunk, onDone, onError, onCorrection, onCancel, onFormTrigger, onToolEvent }, retryCount = 0) {
+  const MAX_RETRIES = 3
   const controller = new AbortController()
-  const token = localStorage.getItem('token') || ''
+  const token = localStorage.getItem('access_token') || ''
 
   fetch('/api/chat/message/stream', {
     method: 'POST',
@@ -54,6 +55,7 @@ export function sendMessageStream(chatId, message, { onChunk, onDone, onError, o
 
       const decoder = new TextDecoder()
       let buffer = ''
+      let completed = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -61,9 +63,7 @@ export function sendMessageStream(chatId, message, { onChunk, onDone, onError, o
 
         buffer += decoder.decode(value, { stream: true })
 
-        // 解析 SSE 数据帧: "data: <json>\n\n"
         const lines = buffer.split('\n')
-        // 最后一个可能是不完整的行，保留到下次处理
         buffer = lines.pop() || ''
 
         for (const line of lines) {
@@ -72,38 +72,31 @@ export function sendMessageStream(chatId, message, { onChunk, onDone, onError, o
             if (jsonStr === '[DONE]') continue
             try {
               const parsed = JSON.parse(jsonStr)
-              // 根据事件类型处理
               if (parsed.type === 'content') {
-                // 增量内容
                 if (parsed.content && typeof parsed.content === 'string') {
                   onChunk(parsed.content)
                 }
               } else if (parsed.type === 'correction') {
-                // 修正内容（去重后的完整内容）
-                // 触发特殊回调或直接替换
                 if (typeof onCorrection === 'function' && parsed.content) {
                   onCorrection(parsed.content)
                 }
               } else if (parsed.type === 'done') {
-                // 完成信号
+                completed = true
                 onDone?.(parsed.content)
               } else if (parsed.type === 'form_trigger') {
-                // 触发心理健康表单
-                console.log('SSE 收到 form_trigger:', parsed)
                 onFormTrigger?.(parsed.ai_context || '', parsed.msg_id || null)
+              } else if (parsed.type === 'mcp_event' || parsed.type === 'tool_call' || parsed.type === 'tool_result') {
+                onToolEvent?.(parsed.type, parsed.payload)
               } else if (parsed.type === 'error') {
-                // 错误信号
                 onError?.(parsed.error)
                 return
               } else {
-                // 兼容其他格式
                 const chunk = parsed.content || parsed.delta || parsed.text || ''
                 if (chunk && typeof chunk === 'string') {
                   onChunk(chunk)
                 }
               }
             } catch {
-              // 非 JSON 行，可能是纯文本内容
               if (jsonStr) {
                 onChunk(jsonStr)
               }
@@ -111,18 +104,46 @@ export function sendMessageStream(chatId, message, { onChunk, onDone, onError, o
           }
         }
       }
-      onDone?.()
+
+      // 流自然结束但没收到 done 信号 → 可能是连接中断，触发重连
+      if (!completed && retryCount < MAX_RETRIES) {
+        console.log(`SSE 流中断，正在重连 (${retryCount + 1}/${MAX_RETRIES})...`)
+        const delay = Math.min(1000 * Math.pow(2, retryCount), 8000)
+        await new Promise((r) => setTimeout(r, delay))
+        const retryCtrl = sendMessageStream(chatId, message, { onChunk, onDone, onError, onCorrection, onCancel, onFormTrigger, onToolEvent }, retryCount + 1)
+        // 将新的 controller 替换（让外部 abort 能取消重连中的请求）
+        controller._retryCtrl = retryCtrl
+      } else if (!completed) {
+        onError?.(new Error('SSE 连接失败，已达最大重试次数'))
+      } else {
+        onDone?.()
+      }
     })
     .catch((err) => {
       if (err.name === 'AbortError') {
         onCancel?.()
         return
       }
-      onError?.(err)
+      // HTTP 错误或网络错误 → 重试
+      if (retryCount < MAX_RETRIES) {
+        console.log(`SSE 请求失败，正在重连 (${retryCount + 1}/${MAX_RETRIES})...`)
+        const delay = Math.min(1000 * Math.pow(2, retryCount), 8000)
+        setTimeout(() => {
+          const retryCtrl = sendMessageStream(chatId, message, { onChunk, onDone, onError, onCorrection, onCancel, onFormTrigger, onToolEvent }, retryCount + 1)
+          controller._retryCtrl = retryCtrl
+        }, delay)
+      } else {
+        onError?.(err)
+      }
     })
 
-  // 返回取消函数
-  return () => controller.abort()
+  return () => {
+    controller.abort()
+    // 取消重连中的请求
+    if (controller._retryCtrl) {
+      controller._retryCtrl()
+    }
+  }
 }
 
 /**
@@ -217,4 +238,13 @@ export function getMentalHealthStats(params) {
  */
 export function getMentalHealthRecords(params) {
   return request.get('/mental-health/records', { params })
+}
+
+/**
+ * 15. 重新生成 AI 回复
+ *     POST /api/chat/{chat_id}/regenerate
+ *     删除最后一条 AI 回复，返回触发它的用户消息
+ */
+export function regenerateMessage(chatId) {
+  return request.post(`/chat/${chatId}/regenerate`)
 }

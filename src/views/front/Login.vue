@@ -124,12 +124,14 @@ async function handleSubmit() {
       const res = await loginApi({ username: form.account, password: form.password })
       console.log('登录成功，后端返回:', JSON.stringify(res, null, 2))
 
-      // 后端返回格式：{ code: 200, msg, data: { token, userInfo: { id, username, email, sex } } }
+      // 后端返回格式：{ code: 200, data: { access_token, refresh_token, userInfo } }
       const payload = res.data || res
-      const token = payload.token || res.token
-      const info = payload.userInfo || payload
 
-      userStore.setLogin({ token, userInfo: { ...info, account: form.account } })
+      userStore.setLogin({
+        access_token: payload.access_token,
+        refresh_token: payload.refresh_token,
+        userInfo: { ...payload.userInfo, account: form.account },
+      })
       ElMessage.success('登录成功')
       const redirect = route.query.redirect || '/'
       router.push(redirect)

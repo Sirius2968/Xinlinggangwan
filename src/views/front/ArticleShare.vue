@@ -114,6 +114,7 @@ async function handleDelete(article) {
 }
 
 onMounted(() => {
+  articleStore.loadArticles()
   if (userStore.isLoggedIn) loadData()
 })
 </script>
