@@ -166,12 +166,18 @@ export function getBubbleHtml(msg, index, isLoading, lastIndex) {
     let pendingHtml = ''
     if (pending) {
       if (_hasTrailingUnclosedSyntax(pending)) {
-        // 语法不稳定 → 纯文本占位，避免用户看到 ** 或 ` 等原始字符闪烁
-        pendingHtml = `<span class="streaming-pending">${escapeHtml(pending)}</span>`
+        // 语法不稳定 → 完全隐藏，等语法闭合后再出现
+        // 绝不显示原始 markdown 字符（**, `, ```, [text](url）
+        // 如果没有任何已完成块，下方会追加一个打字指示器
       } else {
-        // 语法稳定 → 直接走 marked（此时结构不会再突变）
+        // 语法稳定 → 直接走 marked（结构不会再突变）
         pendingHtml = renderMarkdown(pending, false)
       }
+    }
+
+    // 没有已完成块且 pending 被隐藏 → 显示打字指示器，让用户知道正在生成
+    if (!state.completedHtml && !pendingHtml) {
+      return '<span class="typing-indicator"><i></i><i></i><i></i></span>'
     }
 
     return state.completedHtml + pendingHtml

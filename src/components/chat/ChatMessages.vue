@@ -246,6 +246,21 @@ defineExpose({ scrollToBottom })
   &:deep(.streaming-pending) {
     opacity: 0.75;
   }
+
+  // 打字指示器（pending 被隐藏时显示，告知用户正在生成）
+  &:deep(.typing-indicator) {
+    display: inline-flex; gap: 4px; align-items: center;
+
+    i {
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: $color-text-placeholder;
+      border-radius: 50%;
+      animation: bounce 1.4s infinite ease-in-out both;
+      &:nth-child(1) { animation-delay: -0.32s; }
+      &:nth-child(2) { animation-delay: -0.16s; }
+    }
+  }
 }
 
 @keyframes blink-cursor {
