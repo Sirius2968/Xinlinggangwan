@@ -9,8 +9,9 @@ const request = axios.create({
   timeout: 10000,
 })
 
-// 缓存 token，避免每次请求都同步读取 localStorage
-let cachedToken = localStorage.getItem('access_token') || ''
+// 缓存 token，直接从 localStorage 裸 key 读取
+const _loadToken = () => localStorage.getItem('access_token') || ''
+let cachedToken = _loadToken()
 export function setAuthToken(token) {
   cachedToken = token || ''
 }
@@ -30,7 +31,7 @@ function addPendingRequest(cb) {
   pendingRequests.push(cb)
 }
 
-async function tryRefreshToken() {
+export async function tryRefreshToken() {
   const refreshToken = localStorage.getItem('refresh_token')
   if (!refreshToken) return null
 
@@ -94,8 +95,12 @@ request.interceptors.response.use(
     if (status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/user/refresh')) {
       if (!isRefreshing) {
         isRefreshing = true
-        const newToken = await tryRefreshToken()
-        isRefreshing = false
+        let newToken = null
+        try {
+          newToken = await tryRefreshToken()
+        } finally {
+          isRefreshing = false
+        }
 
         if (newToken) {
           onRefreshed(newToken)
@@ -104,14 +109,11 @@ request.interceptors.response.use(
           return request(originalRequest)
         }
 
-        // 刷新失败 → 清空状态跳登录
+        // 刷新失败 → 清空状态
         onRefreshed(null)
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        localStorage.removeItem('userInfo')
-        setAuthToken('')
+        const { useUserStore } = await import('@/stores/user')
+        useUserStore().logout()
         ElMessage.error('登录已过期，请重新登录')
-        window.location.href = '/login'
         return Promise.reject(error)
       }
 
@@ -130,12 +132,12 @@ request.interceptors.response.use(
     }
 
     switch (status) {
-      case 401:
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
+      case 401: {
+        const { useUserStore } = await import('@/stores/user')
+        useUserStore().logout()
         ElMessage.error(body?.msg || '登录已过期，请重新登录')
-        window.location.href = '/login'
         break
+      }
       case 403:
         ElMessage.error(body?.msg || '没有权限访问')
         break

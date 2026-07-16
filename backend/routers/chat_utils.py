@@ -42,10 +42,15 @@ def should_trigger_form(user_message: str, ai_response: str = "") -> bool:
     return False
 
 
-def check_ownership(session, user: dict | None) -> bool:
-    """校验对话是否属于当前用户。session.user_id 为 NULL 视为匿名对话。"""
+def check_ownership(session, user: dict | None):
+    """校验对话是否属于当前用户。session.user_id 为 NULL 视为匿名对话。
+    返回 None 表示校验通过；返回 JSONResponse 表示鉴权/授权失败（由路由直接 return）。"""
     if session.user_id is None:
-        return True
+        return None
     if user is None:
-        return False
-    return str(session.user_id) == str(user["user_id"])
+        from schemas import fail
+        return fail(401, "请先登录")
+    if str(session.user_id) != str(user["user_id"]):
+        from schemas import fail
+        return fail(403, "无权访问此对话")
+    return None

@@ -17,31 +17,29 @@ const router = useRouter()
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .login-gate {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  @include flex-col-center;
   justify-content: center;
   min-height: 400px;
   text-align: center;
   padding: 80px 20px;
+
+  h2 {
+    font-size: 22px;
+    color: $color-text-primary;
+    margin-bottom: 8px;
+  }
+
+  p {
+    color: $color-text-secondary;
+    font-size: 15px;
+    margin-bottom: 24px;
+  }
 }
 
 .gate-icon {
   font-size: 56px;
   margin-bottom: 16px;
-}
-
-.login-gate h2 {
-  font-size: 22px;
-  color: #303133;
-  margin-bottom: 8px;
-}
-
-.login-gate p {
-  color: #909399;
-  font-size: 15px;
-  margin-bottom: 24px;
 }
 </style>

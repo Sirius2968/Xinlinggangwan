@@ -201,31 +201,28 @@ async function handleSubmit() {
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .login-page {
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  @include flex-center;
   min-height: calc(100vh - 180px);
 }
 
 .login-card {
   width: 400px;
   padding: 40px 36px;
-  background: #fff;
-  border-radius: 12px;
+  background: $color-white;
+  border-radius: $radius-xl;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
-}
 
-/* 注册模式卡片加宽一点，容纳更多字段 */
-.login-card.wide {
-  width: 480px;
-}
+  &.wide {
+    width: 480px;
+  }
 
-.login-card h2 {
-  text-align: center;
-  margin-bottom: 28px;
-  color: #303133;
+  h2 {
+    text-align: center;
+    margin-bottom: 28px;
+    color: $color-text-primary;
+  }
 }
 
 .submit-btn {
@@ -234,19 +231,19 @@ async function handleSubmit() {
 
 .toggle-text {
   text-align: center;
-  font-size: 14px;
-  color: #999;
-}
+  font-size: $font-size-base;
+  color: $color-text-light;
 
-.toggle-text a {
-  color: #409eff;
-  text-decoration: none;
+  a {
+    color: $color-primary;
+    text-decoration: none;
+  }
 }
 
 .field-error {
   display: block;
-  font-size: 12px;
-  color: #f56c6c;
+  font-size: $font-size-xs;
+  color: $color-danger;
   margin-top: 2px;
   line-height: 1.2;
 }

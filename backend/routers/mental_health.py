@@ -11,6 +11,65 @@ from models import MentalHealthRecord
 from schemas import MentalHealthRecordRequest, ok, fail
 from auth import get_current_user
 
+def _aggregate_trend(records, period):
+    """按周期聚合趋势数据：year→12个月, month→3天区间, week→7天"""
+    if not records:
+        return []
+
+    if period == "year":
+        # 按月聚合：1月..12月
+        buckets = {}
+        for r in records:
+            month = r.created_at.month
+            buckets.setdefault(month, []).append(r.mood_score)
+        result = []
+        for m in range(1, 13):
+            scores = buckets.get(m, [])
+            result.append({
+                "label": f"{m}月",
+                "score": round(sum(scores) / len(scores), 1) if scores else None,
+                "count": len(scores),
+            })
+        return result
+
+    if period == "week":
+        # 按周几聚合：周一..周日
+        weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        buckets = {}
+        for r in records:
+            wd = r.created_at.weekday()  # 0=周一
+            buckets.setdefault(wd, []).append(r.mood_score)
+        result = []
+        for i, name in enumerate(weekday_names):
+            scores = buckets.get(i, [])
+            result.append({
+                "label": name,
+                "score": round(sum(scores) / len(scores), 1) if scores else None,
+                "count": len(scores),
+            })
+        return result
+
+    # month (default): 按3天区间聚合
+    buckets = {}
+    for r in records:
+        day = r.created_at.day
+        # 将日期映射到3天区间: 1-3→0, 4-6→1, ..., 28-31→9
+        bucket_idx = min((day - 1) // 3, 9)
+        buckets.setdefault(bucket_idx, []).append(r.mood_score)
+    result = []
+    for i in range(10):
+        start = i * 3 + 1
+        end = min(start + 2, 31)
+        label = f"{start}-{end}日"
+        scores = buckets.get(i, [])
+        result.append({
+            "label": label,
+            "score": round(sum(scores) / len(scores), 1) if scores else None,
+            "count": len(scores),
+        })
+    return result
+
+
 router = APIRouter(prefix="/api/mental-health", tags=["心理健康记录"])
 
 
@@ -142,15 +201,8 @@ def get_stats(
 
     records = query.order_by(MentalHealthRecord.created_at.asc()).all()
 
-    # 1. 情绪评分趋势（时间序列）
-    trend = [
-        {
-            "date": r.created_at.strftime("%m-%d %H:%M") if r.created_at else "",
-            "score": r.mood_score,
-            "emotion": r.emotion_type,
-        }
-        for r in records
-    ]
+    # 1. 情绪评分趋势（按周期聚合）
+    trend = _aggregate_trend(records, period or "month")
 
     # 2. 情绪类型分布（饼图/柱状图）
     emotion_count = {}

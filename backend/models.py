@@ -4,7 +4,7 @@ ORM 模型定义
 
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, func
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, func
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -32,6 +32,8 @@ class ChatSession(Base):
     chat_id = Column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 可为空，允许未登录使用
     title = Column(String(100), default="新对话")
+    is_pinned = Column(Boolean, default=False)
+    pinned_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="chat_sessions")
@@ -47,6 +49,8 @@ class ChatMessage(Base):
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
     role = Column(String(20), nullable=False)   # "user" 或 "assistant"
     content = Column(Text, nullable=False)
+    idempotency_key = Column(String(36), nullable=True, unique=True, index=True)
+    completed = Column(Boolean, default=True)    # AI 消息是否已完整生成（中断时=False）
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("ChatSession", back_populates="messages")

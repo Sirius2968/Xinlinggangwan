@@ -21,6 +21,9 @@ const showDialog = ref(false)
 const editId = ref(null)
 const form = ref({ title: '', content: '', tags: '' })
 const submitting = ref(false)
+// 文章详情弹窗
+const detailArticle = ref(null)
+const detailType = ref('builtin') // 'builtin' | 'community'
 
 async function loadMyArticles() {
   try {
@@ -54,6 +57,15 @@ function switchTab(t) {
 
 // 收藏的内置文章（来自 Pinia store）
 const favBuiltinArticles = computed(() => articleStore.favoritedArticles)
+
+function openDetail(article, type = 'builtin') {
+  detailArticle.value = article
+  detailType.value = type
+}
+
+function closeDetail() {
+  detailArticle.value = null
+}
 
 async function handleRemoveFav(article) {
   try {
@@ -174,7 +186,8 @@ onMounted(() => {
         <div v-if="favBuiltinArticles.length > 0" class="fav-section">
           <h3 class="fav-section-title">心理知识</h3>
           <div class="fav-grid">
-            <div v-for="article in favBuiltinArticles" :key="'b'+article.id" class="fav-card">
+            <div v-for="article in favBuiltinArticles" :key="'b'+article.id" class="fav-card"
+                 @click="openDetail(article, 'builtin')">
               <span class="fav-icon">{{ article.icon }}</span>
               <div class="fav-info">
                 <strong>{{ article.title }}</strong>
@@ -189,7 +202,8 @@ onMounted(() => {
         <div v-if="favArticles.length > 0" class="fav-section">
           <h3 class="fav-section-title">社区分享</h3>
           <div class="article-list">
-            <div v-for="article in favArticles" :key="'s'+article.id" class="article-card">
+            <div v-for="article in favArticles" :key="'s'+article.id" class="article-card"
+                 @click="openDetail(article, 'community')">
               <div class="card-header">
                 <h3>{{ article.title }}</h3>
                 <div class="card-tags" v-if="article.tags">
@@ -204,7 +218,7 @@ onMounted(() => {
                   <span class="author">&#x1f464; {{ article.author }}</span>
                   <span class="time">{{ article.created_at?.slice(0, 10) || '' }}</span>
                 </div>
-                <button class="unfav-btn" @click="handleRemoveFav(article)">取消收藏</button>
+                <button class="unfav-btn" @click.stop="handleRemoveFav(article)">取消收藏</button>
               </div>
             </div>
           </div>
@@ -247,98 +261,210 @@ onMounted(() => {
           />
         </div>
       </BaseDialog>
+
+      <!-- 文章详情弹窗 -->
+      <BaseDialog
+        :model-value="!!detailArticle"
+        :title="detailArticle?.title || ''"
+        width="680px"
+        :show-footer="false"
+        @close="closeDetail"
+      >
+        <template v-if="detailArticle">
+          <div class="article-detail">
+            <div class="detail-meta" v-if="detailType === 'builtin'">
+              <span class="detail-category">{{ detailArticle.category }}</span>
+              <span class="detail-time">{{ detailArticle.readTime }}</span>
+            </div>
+            <div class="detail-meta" v-else>
+              <span class="detail-author">&#x1f464; {{ detailArticle.author }}</span>
+              <span class="detail-date">{{ detailArticle.created_at?.slice(0, 10) || '' }}</span>
+              <div class="detail-tags-inline" v-if="detailArticle.tags">
+                <span v-for="tag in detailArticle.tags.split(',').filter(Boolean)" :key="tag" class="stag">{{ tag.trim() }}</span>
+              </div>
+            </div>
+            <div class="detail-content">{{ detailArticle.content }}</div>
+            <div class="detail-tags" v-if="detailType === 'builtin'">
+              <span v-for="tag in detailArticle.tags" :key="tag" class="tag">{{ tag }}</span>
+            </div>
+          </div>
+        </template>
+      </BaseDialog>
     </template>
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .share-page { max-width: 900px; margin: 0 auto; }
 
-/* ===== 头部 ===== */
-.page-header { text-align: center; padding: 40px 0 24px; }
-.page-header h1 { font-size: 30px; font-weight: 700; color: #2c3e50; margin-bottom: 8px; }
-.page-header p { color: #909399; font-size: 15px; }
+// ===== 头部 =====
+.page-header {
+  text-align: center; padding: 40px 0 24px;
+  h1 { font-size: 30px; font-weight: 700; color: $color-text-title; margin-bottom: 8px; }
+  p { color: $color-text-secondary; font-size: 15px; }
+}
 
-/* ===== 标签切换 ===== */
+// ===== 标签切换 =====
 .tab-bar {
   display: flex; align-items: center; gap: 0;
-  margin-bottom: 24px; border-bottom: 2px solid #ebeef5;
+  margin-bottom: 24px; border-bottom: 2px solid $color-border;
+
+  button {
+    padding: 10px 28px; border: none; background: none;
+    font-size: 15px; color: $color-text-secondary; cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -2px;
+    transition: all 0.25s;
+
+    &:hover { color: $color-primary; }
+    &.active { color: $color-primary; border-bottom-color: $color-primary; font-weight: 600; }
+  }
 }
-.tab-bar button {
-  padding: 10px 28px; border: none; background: none;
-  font-size: 15px; color: #909399; cursor: pointer;
-  border-bottom: 2px solid transparent; margin-bottom: -2px;
-  transition: all 0.25s;
-}
-.tab-bar button:hover { color: #409eff; }
-.tab-bar button.active { color: #409eff; border-bottom-color: #409eff; font-weight: 600; }
+
 .publish-btn { margin-left: auto; margin-bottom: -2px; }
 
-/* ===== 文章卡片列表 ===== */
+// ===== 文章卡片列表 =====
 .article-list { display: flex; flex-direction: column; gap: 16px; }
+
 .article-card {
-  background: #fff; border: 1px solid #ebeef5; border-radius: 14px;
-  padding: 24px; transition: box-shadow 0.3s ease, transform 0.2s ease;
+  background: $color-white; border: 1px solid $color-border; border-radius: 14px;
+  padding: 24px; cursor: pointer;
+  transition: box-shadow 0.3s ease, transform 0.2s ease;
+
+  &:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.08); transform: translateY(-2px); }
 }
-.article-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.08); transform: translateY(-2px); }
-.card-header { margin-bottom: 12px; }
-.card-header h3 { font-size: 18px; color: #303133; margin-bottom: 8px; }
+
+.card-header {
+  margin-bottom: 12px;
+  h3 { font-size: 18px; color: $color-text-primary; margin-bottom: 8px; }
+}
+
 .card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.tag { padding: 2px 10px; border-radius: 10px; font-size: 12px; background: #ecf5ff; color: #409eff; }
-.card-content { font-size: 14px; color: #606266; line-height: 1.7; margin-bottom: 16px; }
+
+.tag {
+  padding: 2px 10px; border-radius: 10px; font-size: 12px;
+  background: $color-primary-light-bg; color: $color-primary;
+}
+
+.card-content { font-size: 14px; color: $color-text-regular; line-height: 1.7; margin-bottom: 16px; }
+
 .card-footer { display: flex; align-items: center; justify-content: space-between; }
-.card-meta { display: flex; gap: 16px; font-size: 13px; color: #909399; }
-.author { color: #606266; font-weight: 500; }
-.time { color: #c0c4cc; }
+
+.card-meta { display: flex; gap: 16px; font-size: 13px; color: $color-text-secondary; }
+
+.author { color: $color-text-regular; font-weight: 500; }
+.time { color: $color-text-placeholder; }
+
 .card-actions { display: flex; align-items: center; gap: 8px; }
 
 .edit-btn, .del-btn {
-  border: 1px solid #ebeef5; border-radius: 6px;
-  background: #fff; font-size: 12px; cursor: pointer; padding: 4px 10px;
-  color: #909399; transition: all 0.2s;
+  border: 1px solid $color-border; border-radius: $radius-md;
+  background: $color-white; font-size: 12px; cursor: pointer; padding: 4px 10px;
+  color: $color-text-secondary; transition: all 0.2s;
 }
-.edit-btn:hover { border-color: #409eff; color: #409eff; }
-.del-btn:hover { border-color: #f56c6c; color: #f56c6c; }
+
+.edit-btn:hover { border-color: $color-primary; color: $color-primary; }
+.del-btn:hover { border-color: $color-danger; color: $color-danger; }
 
 .unfav-btn {
   border: 1px solid #fde2e2; border-radius: 6px;
-  background: #fff; font-size: 12px; cursor: pointer; padding: 4px 10px;
-  color: #f56c6c; transition: all 0.2s;
+  background: $color-white; font-size: 12px; cursor: pointer; padding: 4px 10px;
+  color: $color-danger; transition: all 0.2s;
+  &:hover { background: $color-danger-bg; }
 }
-.unfav-btn:hover { background: #fef0f0; }
 
-/* ===== 收藏区域 ===== */
+// ===== 收藏区域 =====
 .fav-section { margin-bottom: 32px; }
-.fav-section-title { font-size: 16px; color: #303133; margin-bottom: 12px; padding-left: 4px; }
+
+.fav-section-title {
+  font-size: 16px; color: $color-text-primary; margin-bottom: 12px; padding-left: 4px;
+}
+
 .fav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+
 .fav-card {
   display: flex; align-items: center; gap: 14px;
-  background: #fff; border: 1px solid #ebeef5; border-radius: 12px;
-  padding: 16px; transition: box-shadow 0.2s;
-}
-.fav-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-.fav-icon { font-size: 28px; flex-shrink: 0; }
-.fav-info { min-width: 0; }
-.fav-info strong { display: block; font-size: 14px; color: #303133; margin-bottom: 4px; }
-.fav-info p { font-size: 12px; color: #909399; margin: 0 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fav-cat { font-size: 11px; color: #409eff; background: #ecf5ff; padding: 1px 8px; border-radius: 8px; }
+  background: $color-white; border: 1px solid $color-border; border-radius: 12px;
+  padding: 16px; cursor: pointer;
+  transition: box-shadow 0.2s;
 
-/* ===== 空状态 ===== */
-.empty-state { text-align: center; padding: 80px 20px; color: #909399; }
+  &:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+}
+
+.fav-icon { font-size: 28px; flex-shrink: 0; }
+
+.fav-info {
+  min-width: 0;
+  strong { display: block; font-size: 14px; color: $color-text-primary; margin-bottom: 4px; }
+  p {
+    font-size: 12px; color: $color-text-secondary; margin: 0 0 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+}
+
+.fav-cat {
+  font-size: 11px; color: $color-primary; background: $color-primary-light-bg;
+  padding: 1px 8px; border-radius: 8px;
+}
+
+// ===== 空状态 =====
+.empty-state { text-align: center; padding: 80px 20px; color: $color-text-secondary; }
 .empty-icon { font-size: 48px; margin-bottom: 16px; }
 .empty-state p { font-size: 15px; margin-bottom: 16px; }
-.go-browse { color: #409eff; text-decoration: none; font-size: 14px; }
-.go-browse:hover { text-decoration: underline; }
 
-/* ===== 表单 ===== */
-.form-group { margin-bottom: 18px; }
-.form-group label { display: block; font-size: 14px; color: #303133; margin-bottom: 6px; font-weight: 500; }
-.hint { font-weight: 400; color: #c0c4cc; font-size: 12px; }
+.go-browse {
+  color: $color-primary; text-decoration: none; font-size: 14px;
+  &:hover { text-decoration: underline; }
+}
 
-/* ===== 响应式 ===== */
+// ===== 表单 =====
+.form-group {
+  margin-bottom: 18px;
+  label { display: block; font-size: 14px; color: $color-text-primary; margin-bottom: 6px; font-weight: 500; }
+}
+
+.hint { font-weight: 400; color: $color-text-placeholder; font-size: 12px; }
+
+// ===== 文章详情弹窗 =====
+.article-detail { text-align: left; }
+
+.detail-meta {
+  display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
+  padding-bottom: 16px; border-bottom: 1px solid $color-border;
+}
+
+.detail-category {
+  font-size: 13px; color: $color-primary; background: $color-primary-light-bg;
+  padding: 3px 12px; border-radius: 10px;
+}
+
+.detail-time { font-size: 13px; color: $color-text-placeholder; }
+
+.detail-author { font-size: 13px; color: $color-text-regular; font-weight: 500; }
+
+.detail-date { font-size: 13px; color: $color-text-placeholder; }
+
+.detail-tags-inline { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+
+.stag {
+  padding: 1px 8px; border-radius: 8px; font-size: 11px;
+  background: #f0f9eb; color: $color-success;
+}
+
+.detail-content {
+  font-size: $font-size-base; color: $color-text-regular;
+  line-height: 1.9; white-space: pre-line; margin-bottom: 20px;
+}
+
+.detail-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.tag {
+  padding: 2px 8px; border-radius: 8px; font-size: 11px;
+  background: $color-bg-page; color: $color-text-secondary;
+}
+
+// ===== 响应式 =====
 @media (max-width: 768px) {
-  .page-header { padding: 20px 0 16px; }
-  .page-header h1 { font-size: 24px; }
+  .page-header { padding: 20px 0 16px; h1 { font-size: 24px; } }
   .tab-bar { flex-wrap: wrap; gap: 0; }
   .publish-btn { width: 100%; margin-top: 8px; }
   .fav-grid { grid-template-columns: 1fr; }

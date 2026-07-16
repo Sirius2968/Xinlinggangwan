@@ -2,6 +2,10 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
+import Components from 'unplugin-vue-components/vite'
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+import fs from 'node:fs'
+import path from 'node:path'
 
 // ============================================================
 // CDN 配置
@@ -48,11 +52,36 @@ function importMapPlugin() {
   }
 }
 
+// ============================================================
+// 构建时自动生成 version.json（outDir 由 configResolved 捕获）
+// ============================================================
+let resolvedOutDir = 'dist'
+function versionBumpPlugin() {
+  return {
+    name: 'vite-version-bump',
+    apply: 'build',
+    configResolved(config) {
+      resolvedOutDir = config.build.outDir
+    },
+    closeBundle() {
+      const p = path.resolve(resolvedOutDir, 'version.json')
+      const now = new Date().toISOString()
+      fs.writeFileSync(p, JSON.stringify({ version: now }))
+      console.log(`  [version-bump] → ${now}`)
+    },
+  }
+}
+
 export default defineConfig({
   base: CDN_BASE_URL,
   plugins: [
     vue(),
     vueDevTools(),
+    Components({
+      resolvers: [ElementPlusResolver({ importStyle: 'css' })],
+      dts: false, // 不生成 .d.ts，减少文件变动
+    }),
+    versionBumpPlugin(),
     ...(ENABLE_CDN_EXTERNAL ? [importMapPlugin()] : []),
   ],
   resolve: {
@@ -65,6 +94,13 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+      },
+    },
+  },
+  css: {
+    preprocessorOptions: {
+      scss: {
+        additionalData: `@use "@/styles/variables" as *; @use "@/styles/mixins" as *;`,
       },
     },
   },

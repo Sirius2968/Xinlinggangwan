@@ -62,6 +62,8 @@ class RefreshTokenRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     chat_id: str = Field(..., description="对话 ID")
     message: str = Field(..., min_length=1, description="用户消息")
+    resume: bool = Field(default=False, description="是否续接中断的生成")
+    idempotency_key: str | None = Field(default=None, max_length=36, description="幂等令牌，防止重复创建消息")
 
 
 # ============================================================

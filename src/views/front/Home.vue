@@ -390,7 +390,7 @@ function goTo(route) {
       </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 /* ============================================================
    性能优化策略：
    1. 只用 transform/opacity 做动画（GPU 合成，不触发重排）
@@ -453,9 +453,9 @@ function goTo(route) {
 }
 
 .section-title {
-  font-size: 30px; font-weight: 700; color: #2c3e50; margin-bottom: 10px;
+  font-size: 30px; font-weight: 700; color: $color-text-title; margin-bottom: 10px;
 }
-.section-desc { color: #909399; font-size: 16px; margin-bottom: 36px; }
+.section-desc { color: $color-text-secondary; font-size: 16px; margin-bottom: 36px; }
 
 /* ===== 1. 轮播 + 覆盖层 ===== */
 .carousel-wrapper {
@@ -498,7 +498,7 @@ function goTo(route) {
   contain: layout style paint;
 }
 .nav-card {
-  background: #fff; border-radius: 16px; padding: 32px 24px;
+  background: $color-white; border-radius: 16px; padding: 32px 24px;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.06);
   cursor: pointer;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -512,9 +512,9 @@ function goTo(route) {
   border-color: rgba(64, 158, 255, 0.2);
 }
 .nav-icon { font-size: 40px; margin-bottom: 16px; }
-.nav-card h3 { font-size: 18px; color: #303133; margin-bottom: 8px; }
-.nav-card p { font-size: 14px; color: #909399; line-height: 1.7; margin-bottom: 16px; }
-.nav-link { color: #409eff; font-size: 14px; font-weight: 600; }
+.nav-card h3 { font-size: 18px; color: $color-text-primary; margin-bottom: 8px; }
+.nav-card p { font-size: 14px; color: $color-text-secondary; line-height: 1.7; margin-bottom: 16px; }
+.nav-link { color: $color-primary; font-size: 14px; font-weight: 600; }
 
 /* ===== 3. 什么是心理健康 ===== */
 .what-section {
@@ -527,11 +527,11 @@ function goTo(route) {
   max-width: 1100px; margin: 0 auto; text-align: left;
 }
 .what-text { flex: 1 1 55%; }
-.what-text h2 { font-size: 28px; color: #2c3e50; margin-bottom: 16px; }
-.what-text p { font-size: 15px; color: #606266; line-height: 1.9; margin-bottom: 16px; }
-.highlight { color: #409eff; font-weight: 600; }
+.what-text h2 { font-size: 28px; color: $color-text-title; margin-bottom: 16px; }
+.what-text p { font-size: 15px; color: $color-text-regular; line-height: 1.9; margin-bottom: 16px; }
+.highlight { color: $color-primary; font-weight: 600; }
 .what-features { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
-.what-feat { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #606266; }
+.what-feat { display: flex; align-items: center; gap: 8px; font-size: 14px; color: $color-text-regular; }
 .feat-dot { width: 8px; height: 8px; border-radius: 50%; background: #409eff; flex-shrink: 0; }
 
 .what-visual { flex: 0 0 260px; position: relative; height: 260px; }
@@ -563,7 +563,7 @@ function goTo(route) {
   gap: 24px; max-width: 1100px; margin: 0 auto;
 }
 .issue-card {
-  background: #fff; border: 1px solid #ebeef5; border-radius: 14px;
+  background: $color-white; border: 1px solid #ebeef5; border-radius: 14px;
   padding: 28px 24px; text-align: left;
   transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
               box-shadow 0.35s ease,
@@ -583,22 +583,22 @@ function goTo(route) {
 }
 .issue-icon-wrap { margin-bottom: 14px; }
 .issue-icon { font-size: 36px; }
-.issue-card h3 { font-size: 18px; color: #303133; margin-bottom: 8px; }
-.issue-card p { font-size: 14px; color: #909399; line-height: 1.7; margin-bottom: 14px; }
+.issue-card h3 { font-size: 18px; color: $color-text-primary; margin-bottom: 8px; }
+.issue-card p { font-size: 14px; color: $color-text-secondary; line-height: 1.7; margin-bottom: 14px; }
 .issue-tags { display: flex; gap: 8px; flex-wrap: wrap; }
 .issue-tags span {
   padding: 3px 10px; border-radius: 12px; font-size: 12px;
-  background: #ecf5ff; color: #409eff;
+  background: #ecf5ff; color: $color-primary;
 }
 
 /* ===== 5. 忽视危害 ===== */
 .danger-section { background: #fef0f0; }
 .danger-container { max-width: 1100px; margin: 0 auto; }
-.danger-container h2 { font-size: 28px; color: #2c3e50; margin-bottom: 8px; }
-.danger-subtitle { color: #909399; margin-bottom: 36px; }
+.danger-container h2 { font-size: 28px; color: $color-text-title; margin-bottom: 8px; }
+.danger-subtitle { color: $color-text-secondary; margin-bottom: 36px; }
 .danger-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
 .danger-card {
-  background: #fff; border-radius: 14px; padding: 24px 20px;
+  background: $color-white; border-radius: 14px; padding: 24px 20px;
   text-align: left; border-left: 4px solid #f56c6c;
   transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
               box-shadow 0.35s ease,
@@ -615,14 +615,14 @@ function goTo(route) {
   border-left-width: 8px;
 }
 .danger-num { font-size: 32px; font-weight: 800; color: #fde2e2; margin-bottom: 8px; }
-.danger-card h3 { font-size: 16px; color: #303133; margin-bottom: 8px; }
-.danger-card p { font-size: 13px; color: #909399; line-height: 1.7; }
+.danger-card h3 { font-size: 16px; color: $color-text-primary; margin-bottom: 8px; }
+.danger-card p { font-size: 13px; color: $color-text-secondary; line-height: 1.7; }
 
 /* ===== 6. 正确看待 ===== */
 .view-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; max-width: 1100px; margin: 0 auto; }
 .view-card {
   display: flex; gap: 16px; text-align: left;
-  background: #fff; border-radius: 14px; padding: 24px 20px;
+  background: $color-white; border-radius: 14px; padding: 24px 20px;
   border: 1px solid #ebeef5;
   transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
               box-shadow 0.35s ease,
@@ -643,14 +643,14 @@ function goTo(route) {
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .view-card:hover .view-num { transform: scale(1.15); }
-.view-card h3 { font-size: 16px; color: #303133; margin: 0 0 6px; }
-.view-card p { font-size: 13px; color: #909399; line-height: 1.7; margin: 0; }
+.view-card h3 { font-size: 16px; color: $color-text-primary; margin: 0 0 6px; }
+.view-card p { font-size: 13px; color: $color-text-secondary; line-height: 1.7; margin: 0; }
 
 /* ===== 7. 调适方法 ===== */
 .tips-section { background: #fafbfc; }
 .tips-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; max-width: 1100px; margin: 0 auto; }
 .tip-card {
-  background: #fff; border-radius: 14px; padding: 28px 18px;
+  background: $color-white; border-radius: 14px; padding: 28px 18px;
   transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
               box-shadow 0.35s ease;
   animation: floatUpDown 5s ease-in-out infinite;
@@ -672,8 +672,8 @@ function goTo(route) {
 }
 .tip-card:hover .tip-icon-wrap { transform: scale(1.3) rotate(-10deg); }
 .tip-icon-wrap { font-size: 36px; margin-bottom: 12px; }
-.tip-card h3 { font-size: 16px; color: #303133; margin-bottom: 8px; }
-.tip-card p { font-size: 13px; color: #909399; line-height: 1.7; }
+.tip-card h3 { font-size: 16px; color: $color-text-primary; margin-bottom: 8px; }
+.tip-card p { font-size: 13px; color: $color-text-secondary; line-height: 1.7; }
 
 /* ===== 8. 统计 ===== */
 .stats-section {
@@ -713,11 +713,11 @@ function goTo(route) {
   z-index: 1;
 }
 .cta-section h2 {
-  font-size: 30px; color: #2c3e50; margin-bottom: 10px;
+  font-size: 30px; color: $color-text-title; margin-bottom: 10px;
   transition: transform 0.3s ease;
 }
 .cta-section:hover h2 { transform: scale(1.03); }
-.cta-section p { color: #909399; margin-bottom: 30px; }
+.cta-section p { color: $color-text-secondary; margin-bottom: 30px; }
 .cta-buttons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
 .cta-buttons .el-button {
   transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
@@ -727,10 +727,10 @@ function goTo(route) {
   transform: translateY(-4px) scale(1.05);
   box-shadow: 0 8px 25px rgba(64, 158, 255, 0.3);
 }
-.cta-outline { border-color: #409eff; color: #409eff; }
+.cta-outline { border-color: $color-primary; color: $color-primary; }
 
 /* ===== 10. 底部 ===== */
-.home-footer { padding: 40px 20px; border-top: 1px solid #ebeef5; color: #909399; font-size: 14px; }
+.home-footer { padding: 40px 20px; border-top: 1px solid #ebeef5; color: $color-text-secondary; font-size: 14px; }
 .footer-sub { margin-top: 8px; font-size: 13px; }
 
 /* ===== 响应式 ===== */

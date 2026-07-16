@@ -11,7 +11,7 @@ API 文档自动生成:
 
 from fastapi import FastAPI
 from starlette.middleware.base import BaseHTTPMiddleware
-from database import engine, Base, seed_knowledge_articles
+from database import engine, Base, seed_knowledge_articles, seed_mental_health_data, seed_shared_articles
 from routers import users, chat, mental_health, sleep, articles
 from sanitize import SanitizeMiddleware
 
@@ -22,6 +22,12 @@ Base.metadata.create_all(bind=engine)
 
 # 首次启动时填充内置心理知识文章
 seed_knowledge_articles()
+
+# 首次启动时为 Sirius 用户填充示例心理健康记录（用于图表展示）
+seed_mental_health_data()
+
+# 首次启动时为 Sirius 用户填充示例社区分享文章
+seed_shared_articles()
 
 # ============================================================
 # 创建 FastAPI 应用

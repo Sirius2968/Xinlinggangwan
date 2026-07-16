@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue'
 import { getMentalHealthRecords, getMentalHealthStats, deleteMentalHealthRecord } from '@/api/chat'
 import { useUserStore } from '@/stores/user'
 import LoginGate from '@/components/common/LoginGate.vue'
@@ -16,7 +16,7 @@ const loading = ref(false)
 // 筛选条件
 const period = ref('month')
 const emotionFilter = ref('')
-const scoreFilter = ref(null)  // null=全部, 'low'=较差1-3, 'mid'=一般4-6, 'high'=良好7-10
+const scoreFilter = ref(null)
 
 const scoreOptions = [
   { label: '全部', value: null },
@@ -43,19 +43,13 @@ let trendChart = null
 let distChart = null
 let levelChart = null
 
+const pieColors = ['#67c23a', '#409eff', '#e6a23c', '#f56c6c', '#909399', '#b37feb',
+                    '#5cdbd3', '#ff85c0', '#ffc069', '#95de64', '#69c0ff', '#ff9c6e']
+
 const emotionColors = {
-  '开心': '#67c23a',
-  '平静': '#409eff',
-  '充满希望': '#e6a23c',
-  '感恩': '#f56c6c',
-  '满足': '#67c23a',
-  '放松': '#409eff',
-  '焦虑': '#e6a23c',
-  '悲伤': '#909399',
-  '愤怒': '#f56c6c',
-  '恐惧': '#e6a23c',
-  '压力': '#f56c6c',
-  '其他': '#409eff',
+  '开心': '#67c23a', '平静': '#409eff', '充满希望': '#e6a23c', '感恩': '#f56c6c',
+  '满足': '#67c23a', '放松': '#409eff', '焦虑': '#e6a23c', '悲伤': '#909399',
+  '愤怒': '#f56c6c', '恐惧': '#e6a23c', '压力': '#f56c6c', '其他': '#409eff',
 }
 
 function moodColor(score) {
@@ -78,6 +72,17 @@ function formatDate(iso) {
     hour: '2-digit', minute: '2-digit',
   })
 }
+
+// 饼图图例数据（用于自定义 grid）
+const distLegendData = computed(() => {
+  if (!stats.value?.distribution) return []
+  const total = stats.value.distribution.reduce((s, d) => s + d.count, 0)
+  return stats.value.distribution.map((d, i) => ({
+    ...d,
+    color: pieColors[i % pieColors.length],
+    percent: total > 0 ? Math.round((d.count / total) * 100) : 0,
+  }))
+})
 
 async function loadData() {
   if (!userStore.isLoggedIn) return
@@ -103,6 +108,8 @@ async function loadData() {
   } finally {
     loading.value = false
     await nextTick()
+    recalcCols()
+    recalcCols()
     renderCharts()
   }
 }
@@ -121,6 +128,50 @@ async function handleDelete(record) {
 }
 
 // ============================================================
+// 虚拟列表（Grid 自适应列数 + 固定行高）
+// ============================================================
+const listContainerRef = ref(null)
+const scrollTop = ref(0)
+const gridCols = ref(3)
+const rowHeight = 200       // 每行卡片高度（含 gap）
+const bufferRows = 4        // 上下各缓冲行数，防止快速滚动白屏
+
+function recalcCols() {
+  const el = listContainerRef.value
+  if (el) {
+    gridCols.value = Math.max(1, Math.floor((el.clientWidth + 16) / 316))
+  }
+}
+
+function handleScroll(event) {
+  scrollTop.value = event.target.scrollTop
+}
+
+// ---- 以下全部为 computed，由 scrollTop 驱动 ----
+const totalRows = computed(() => Math.ceil(records.value.length / gridCols.value))
+
+const totalHeight = computed(() => totalRows.value * rowHeight)
+
+const startRow = computed(() => {
+  return Math.max(0, Math.floor(scrollTop.value / rowHeight) - bufferRows)
+})
+
+const endRow = computed(() => {
+  return Math.min(
+    totalRows.value,
+    Math.ceil((scrollTop.value + (listContainerRef.value?.clientHeight || 600)) / rowHeight) + bufferRows,
+  )
+})
+
+const visibleRecords = computed(() => {
+  const start = startRow.value * gridCols.value
+  const end = Math.min(records.value.length, endRow.value * gridCols.value)
+  return records.value.slice(start, end)
+})
+
+const offsetY = computed(() => startRow.value * rowHeight)
+
+// ============================================================
 // ECharts 渲染
 // ============================================================
 function destroyCharts() {
@@ -133,23 +184,33 @@ function destroyCharts() {
 }
 
 function renderCharts() {
-  // 无数据时销毁图表，释放 Canvas
   if (!stats.value) {
     destroyCharts()
     return
   }
 
-  // ------ 趋势折线图 ------
+  // ------ 趋势折线图（聚合数据） ------
   if (trendChartRef.value && stats.value.trend?.length) {
     if (!trendChart) { trendChart = echarts.init(trendChartRef.value) }
     const data = stats.value.trend
+    const labels = data.map(d => d.label)
+    const scores = data.map(d => d.score)
     trendChart.setOption({
-      tooltip: { trigger: 'axis', confine: true },
-      grid: { left: 55, right: 55, top: 35, bottom: 80 },
+      tooltip: {
+        trigger: 'axis',
+        confine: true,
+        formatter: (params) => {
+          const p = params[0]
+          if (p.value == null) return `${p.axisValue}<br/>暂无数据`
+          const item = data[p.dataIndex]
+          return `${p.axisValue}<br/>平均评分: ${p.value}<br/>记录数: ${item.count}`
+        },
+      },
+      grid: { left: 55, right: 30, top: 35, bottom: 50 },
       xAxis: {
         type: 'category',
-        data: data.map(d => d.date),
-        axisLabel: { rotate: 25, fontSize: 10, color: '#a0908a', interval: 'auto' },
+        data: labels,
+        axisLabel: { fontSize: 11, color: '#a0908a' },
         axisLine: { lineStyle: { color: '#ebcdc7' } },
       },
       yAxis: {
@@ -158,46 +219,48 @@ function renderCharts() {
         splitLine: { lineStyle: { color: '#f5e0dc', type: 'dashed' } },
       },
       series: [{
-        data: data.map(d => d.score),
+        data: scores,
         type: 'line',
         smooth: true,
+        connectNulls: false,
         lineStyle: { color: '#e6a23c', width: 2 },
         itemStyle: { color: '#e6a23c' },
+        symbol: 'circle',
+        symbolSize: 6,
         areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
           { offset: 0, color: 'rgba(230,162,60,0.25)' },
           { offset: 1, color: 'rgba(230,162,60,0.02)' },
         ])},
         markLine: {
           silent: true,
+          symbol: 'none',
           data: [
-            { yAxis: 3, lineStyle: { color: '#f56c6c', type: 'dashed' }, label: { formatter: '较差', color: '#f56c6c' } },
-            { yAxis: 7, lineStyle: { color: '#67c23a', type: 'dashed' }, label: { formatter: '良好', color: '#67c23a' } },
+            { yAxis: 3, lineStyle: { color: '#f56c6c', type: 'dashed' }, label: { formatter: '较差', color: '#f56c6c', fontSize: 11 } },
+            { yAxis: 7, lineStyle: { color: '#67c23a', type: 'dashed' }, label: { formatter: '良好', color: '#67c23a', fontSize: 11 } },
           ],
         },
       }],
     }, { notMerge: true })
   }
 
-  // ------ 情绪分布饼图 ------
+  // ------ 情绪分布饼图（无 legend，改用自定义 grid） ------
   if (distChartRef.value && stats.value.distribution?.length) {
     if (!distChart) { distChart = echarts.init(distChartRef.value) }
-    const data = stats.value.distribution.map(d => ({
+    const data = stats.value.distribution.map((d, i) => ({
       name: d.name,
       value: d.count,
+      itemStyle: { color: pieColors[i % pieColors.length] },
     }))
     distChart.setOption({
       tooltip: { trigger: 'item', formatter: '{b}: {c} 次 ({d}%)', confine: true },
-      legend: { type: 'scroll', bottom: 10, textStyle: { color: '#8b7a74', fontSize: 10 }, pageTextStyle: { color: '#8b7a74' } },
       series: [{
         type: 'pie',
-        radius: ['40%', '65%'],
-        center: ['50%', '40%'],
+        radius: ['45%', '70%'],
+        center: ['50%', '45%'],
         itemStyle: { borderRadius: 4, borderColor: '#fff9f9', borderWidth: 2 },
         label: { show: false },
         emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
         data,
-        color: ['#67c23a', '#409eff', '#e6a23c', '#f56c6c', '#909399', '#b37feb',
-                '#5cdbd3', '#ff85c0', '#ffc069', '#95de64', '#69c0ff', '#ff9c6e'],
       }],
     }, { notMerge: true })
   }
@@ -209,7 +272,7 @@ function renderCharts() {
     const colors = { '较差': '#f56c6c', '一般': '#e6a23c', '良好': '#67c23a' }
     levelChart.setOption({
       tooltip: { trigger: 'axis', confine: true },
-      grid: { left: 55, right: 30, top: 35, bottom: 50 },
+      grid: { left: 55, right: 30, top: 35, bottom: 40 },
       xAxis: {
         type: 'category',
         data: data.map(d => d.name),
@@ -234,7 +297,6 @@ function renderCharts() {
   }
 }
 
-// 窗口大小变化时重绘（150ms 防抖，避免拖拽窗口时频繁触发）
 function debounce(fn, delay = 150) {
   let timer = null
   return function (...args) {
@@ -247,9 +309,9 @@ const onResize = debounce(() => {
   trendChart?.resize()
   distChart?.resize()
   levelChart?.resize()
+  recalcCols()
 })
 
-// 监听筛选条件变化
 watch([period, emotionFilter, scoreFilter], () => {
   loadData()
 })
@@ -328,8 +390,17 @@ onBeforeUnmount(() => {
         <div class="charts-row">
           <div class="chart-card chart-half">
             <h3 class="chart-title">情绪分布</h3>
-            <div ref="distChartRef" class="chart-box"></div>
+            <div ref="distChartRef" class="chart-box chart-pie"></div>
             <div v-if="!stats.distribution?.length" class="chart-empty">暂无分布数据</div>
+            <!-- 自定义 CSS Grid 图例 -->
+            <div v-if="distLegendData.length" class="pie-legend-grid">
+              <div v-for="d in distLegendData" :key="d.name" class="pie-legend-item">
+                <span class="legend-dot" :style="{ background: d.color }"></span>
+                <span class="legend-name">{{ d.name }}</span>
+                <span class="legend-count">{{ d.count }}次</span>
+                <span class="legend-pct">{{ d.percent }}%</span>
+              </div>
+            </div>
           </div>
           <div class="chart-card chart-half">
             <h3 class="chart-title">等级分布</h3>
@@ -350,379 +421,278 @@ onBeforeUnmount(() => {
         <span class="sub">在AI咨询中谈论情绪话题时会触发自评表单，提交后将显示在这里</span>
       </div>
 
-      <!-- ===== 记录卡片网格 ===== -->
-      <div v-if="records.length" class="records-grid">
-        <div v-for="r in records" :key="r.id" class="record-card">
-          <div class="record-header">
-            <span class="record-tag" :style="{ background: emotionColors[r.emotion_type] || '#409eff' }">
-              {{ r.emotion_type }}
-            </span>
-            <span class="record-date">{{ formatDate(r.created_at) }}</span>
+      <!-- ===== 记录卡片（虚拟列表） ===== -->
+      <div
+        v-if="records.length"
+        ref="listContainerRef"
+        class="virtual-list-container"
+        @scroll="handleScroll"
+      >
+        <!-- 占位元素：撑出总高度 -->
+        <div class="virtual-list-phantom" :style="{ height: totalHeight + 'px' }"></div>
+        <!-- 可见内容：absolute + transform 定位 -->
+        <div
+          class="virtual-list-content"
+          :style="{ transform: `translateY(${offsetY}px)` }"
+        >
+          <div class="records-grid">
+            <div v-for="r in visibleRecords" :key="r.id" class="record-card">
+              <div class="record-header">
+                <span class="record-tag" :style="{ background: emotionColors[r.emotion_type] || '#409eff' }">
+                  {{ r.emotion_type }}
+                </span>
+                <span class="record-date">{{ formatDate(r.created_at) }}</span>
+              </div>
+
+              <div class="record-score">
+                <span class="score-label">情绪评分：</span>
+                <strong class="score-num" :style="{ color: moodColor(r.mood_score) }">{{ r.mood_score }} / 10</strong>
+                <span class="mood-badge" :style="{ background: moodColor(r.mood_score) }">
+                  {{ moodLabel(r.mood_score) }}
+                </span>
+              </div>
+
+              <el-progress
+                :percentage="r.mood_score * 10"
+                :color="moodColor(r.mood_score)"
+                :stroke-width="8"
+                style="margin-top: 4px;"
+              />
+
+              <div v-if="r.description" class="record-desc">
+                {{ r.description }}
+              </div>
+
+              <button class="card-delete-btn" @click="handleDelete(r)" title="删除此记录">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+                <span>删除</span>
+              </button>
+            </div>
           </div>
-
-          <div class="record-score">
-            <span class="score-label">情绪评分：</span>
-            <strong class="score-num" :style="{ color: moodColor(r.mood_score) }">{{ r.mood_score }} / 10</strong>
-            <span class="mood-badge" :style="{ background: moodColor(r.mood_score) }">
-              {{ moodLabel(r.mood_score) }}
-            </span>
-          </div>
-
-          <el-progress
-            :percentage="r.mood_score * 10"
-            :color="moodColor(r.mood_score)"
-            :stroke-width="8"
-            style="margin-top: 4px;"
-          />
-
-          <div v-if="r.description" class="record-desc">
-            {{ r.description }}
-          </div>
-
-          <button class="card-delete-btn" @click="handleDelete(r)" title="删除此记录">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-            <span>删除</span>
-          </button>
         </div>
       </div>
     </template>
   </div>
 </template>
 
-<style scoped>
-/* ===== 页面整体 ===== */
-.mental-health-page {
-  max-width: 1020px;
-  margin: 0 auto;
-  padding: 24px 0;
-}
+<style lang="scss" scoped>
+// ===== 页面整体 =====
+.mental-health-page { max-width: 1020px; margin: 0 auto; padding: 24px 0; }
 
 .page-header {
-  margin-bottom: 22px;
-  text-align: center;
+  margin-bottom: 22px; text-align: center;
+  h2 { font-size: 24px; color: $color-warm-primary; margin-bottom: 4px; }
+  p { color: $color-warm-secondary; font-size: 14px; }
 }
 
-.page-header h2 {
-  font-size: 24px;
-  color: #8b5e5e;
-  margin-bottom: 4px;
-}
-
-.page-header p {
-  color: #b0928a;
-  font-size: 14px;
-}
-
-/* ===== 筛选栏 ===== */
+// ===== 筛选栏 =====
 .filter-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 22px;
-  padding: 10px 14px;
-  background: #fff9f9;
-  border: 1px solid #f5e0dc;
-  border-radius: 12px;
-  flex-wrap: wrap;
-  gap: 8px;
+  @include flex-center;
+  margin-bottom: 22px; padding: 10px 14px;
+  background: $color-warm-bg; border: 1px solid $color-warm-border;
+  border-radius: 12px; flex-wrap: wrap; gap: 8px;
 }
 
 .filter-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap; justify-content: center;
 }
 
-.score-filter {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+.score-filter { display: flex; align-items: center; gap: 6px; }
 
-.score-filter-label {
-  font-size: 12px;
-  color: #b0928a;
-  white-space: nowrap;
-  margin-right: 2px;
-}
+.score-filter-label { font-size: 12px; color: $color-warm-secondary; white-space: nowrap; margin-right: 2px; }
 
 .score-tag {
-  padding: 4px 12px;
-  border: 1px solid #e8d5ce;
-  border-radius: 14px;
-  background: #fff;
-  color: #8b7a74;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
+  padding: 4px 12px; border: 1px solid #e8d5ce; border-radius: 14px;
+  background: $color-white; color: $color-warm-text; font-size: 12px;
+  cursor: pointer; transition: all 0.2s ease; white-space: nowrap;
+  &:hover { background: #fef5f0; border-color: #d4a99a; }
+  &.active { background: $color-primary; color: $color-white; border-color: $color-primary; }
 }
 
-.score-tag:hover {
-  background: #fef5f0;
-  border-color: #d4a99a;
-}
-
-.score-tag.active {
-  background: #409eff;
-  color: #fff;
-  border-color: #409eff;
-}
-
-/* ===== 概览卡片 ===== */
-.summary-cards {
-  display: flex;
-  gap: 14px;
-  margin-bottom: 22px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
+// ===== 概览卡片 =====
+.summary-cards { display: flex; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; justify-content: center; }
 
 .summary-card {
-  background: #fff9f9;
-  border: 1px solid #f5e0dc;
-  border-radius: 12px;
-  padding: 12px 10px;
-  text-align: center;
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
+  background: $color-warm-bg; border: 1px solid $color-warm-border;
+  border-radius: 12px; padding: 12px 10px; text-align: center;
+  flex: 1 1 0; min-width: 0; overflow: hidden;
 }
 
 .summary-num {
-  display: block;
-  font-size: 22px;
-  font-weight: 700;
-  color: #8b5e5e;
-  line-height: 1.2;
-  word-break: break-all;
+  display: block; font-size: 22px; font-weight: 700;
+  color: $color-warm-primary; line-height: 1.2; word-break: break-all;
 }
+.summary-label { font-size: 12px; color: $color-warm-secondary; margin-top: 4px; display: block; }
 
-.summary-label {
-  font-size: 12px;
-  color: #b0928a;
-  margin-top: 4px;
-  display: block;
-}
-
-/* ===== 图表区域 ===== */
-.charts-area {
-  margin-bottom: 24px;
-}
+// ===== 图表区域 =====
+.charts-area { margin-bottom: 24px; }
 
 .chart-card {
-  background: #fff9f9;
-  border: 1px solid #f5e0dc;
-  border-radius: 14px;
-  padding: 18px 20px 24px;
-  margin-bottom: 16px;
-  margin-top: 20px;
+  background: $color-warm-bg; border: 1px solid $color-warm-border;
+  border-radius: 14px; padding: 18px 20px 24px; margin-bottom: 16px; margin-top: 20px;
 }
 
-.chart-title {
-  font-size: 14px;
-  color: #8b5e5e;
-  margin: 0 0 10px;
-  font-weight: 600;
+.chart-title { font-size: 14px; color: $color-warm-primary; margin: 0 0 10px; font-weight: 600; }
+.chart-box { width: 100%; height: 320px; overflow: visible !important; }
+.chart-trend .chart-box { height: 340px; }
+.chart-pie { height: 240px; }
+
+.charts-row { display: flex; gap: 16px; }
+.chart-half { flex: 1 1 50%; min-width: 0; }
+.chart-empty { text-align: center; color: #c8a89c; font-size: 13px; padding: 40px 0; }
+
+// ---- 自定义饼图图例 Grid ----
+.pie-legend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px 10px;
+  padding: 0 4px;
+  margin-top: 4px;
 }
 
-.chart-box {
-  width: 100%;
-  height: 320px;
-  overflow: visible !important;
-}
-
-.chart-trend .chart-box {
-  height: 340px;
-}
-
-.charts-row {
+.pie-legend-item {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  transition: background 0.15s;
+  cursor: default;
+
+  &:hover { background: rgba(0, 0, 0, 0.03); }
 }
 
-.chart-half {
-  flex: 1 1 50%;
+.legend-dot {
+  width: 10px; height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-name {
+  color: $color-warm-text;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.chart-empty {
-  text-align: center;
+.legend-count {
+  color: $color-warm-primary;
+  font-weight: 600;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.legend-pct {
   color: #c8a89c;
-  font-size: 13px;
-  padding: 40px 0;
+  flex-shrink: 0;
+  font-size: 11px;
 }
 
-/* ===== 空状态 ===== */
-.empty-hint {
-  text-align: center;
-  padding: 60px 20px;
+// ===== 空状态 =====
+.empty-hint { text-align: center; padding: 60px 20px; }
+.empty-icon { font-size: 48px; display: block; margin-bottom: 10px; }
+.empty-hint p { color: $color-warm-secondary; font-size: 15px; }
+.empty-hint .sub { color: #d4b8b0; font-size: 13px; }
+
+// ===== 虚拟列表容器 =====
+.virtual-list-container {
+  height: 600px;
+  overflow-y: auto;
+  position: relative;
+  @include scrollable-y;
+  border-radius: 14px;
+  background: transparent;
+
+  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar-thumb { background: #d4b8b0; border-radius: 3px; }
+  &::-webkit-scrollbar-thumb:hover { background: #c8a89c; }
 }
 
-.empty-icon {
-  font-size: 48px;
-  display: block;
-  margin-bottom: 10px;
+// 占位元素：不占视觉空间，只用来撑出滚动条高度
+.virtual-list-phantom {
+  pointer-events: none;
+  position: relative;
+  z-index: 0;
 }
 
-.empty-hint p {
-  color: #b0928a;
-  font-size: 15px;
+// 实际内容层：absolute + transform 偏移，will-change 提升到合成层
+.virtual-list-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+  z-index: 1;
 }
 
-.empty-hint .sub {
-  color: #d4b8b0;
-  font-size: 13px;
-}
-
-/* ===== Grid 卡片网格 ===== */
+// ===== Grid 卡片网格 =====
 .records-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
+  padding: 2px; // 留出 hover 阴影空间
 }
 
-/* ===== 卡片 ===== */
+// ===== 卡片 =====
 .record-card {
-  background: #fff9f9;
-  border: 1px solid #f5e0dc;
-  border-radius: 14px;
-  padding: 14px 16px;
+  background: $color-warm-bg; border: 1px solid $color-warm-border;
+  border-radius: 14px; padding: 14px 16px;
   box-shadow: 0 2px 12px rgba(180, 120, 110, 0.08);
   transition: transform 0.15s, box-shadow 0.15s;
-  overflow: visible;
-  min-width: 0;
+  overflow: visible; min-width: 0;
+
+  &:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(180, 120, 110, 0.15); }
 }
 
-.record-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(180, 120, 110, 0.15);
-}
-
-/* ---- 删除按钮 ---- */
+// ---- 删除按钮 ----
 .card-delete-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 14px;
-  padding: 5px 12px;
-  border: 1px solid #ebcdc7;
-  border-radius: 8px;
-  background: transparent;
-  color: #c8a89c;
-  font-size: 12px;
-  cursor: pointer;
-  float: right;
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-top: 14px; padding: 5px 12px;
+  border: 1px solid #ebcdc7; border-radius: 8px;
+  background: transparent; color: #c8a89c; font-size: 12px;
+  cursor: pointer; float: right;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+  &:hover { background: #fde8e8; color: $color-danger; border-color: #fbc4c4; }
 }
 
-.card-delete-btn:hover {
-  background: #fde8e8;
-  color: #f56c6c;
-  border-color: #fbc4c4;
-}
-
-/* ---- 头部 ---- */
+// ---- 头部 ----
 .record-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-  gap: 8px;
-  min-width: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; gap: 8px; min-width: 0;
 }
 
-.record-tag {
-  padding: 4px 12px;
-  border-radius: 20px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.5px;
-}
+.record-tag { padding: 4px 12px; border-radius: 20px; color: $color-white; font-size: 12px; font-weight: 500; letter-spacing: 0.5px; }
+.record-date { font-size: 11px; color: #c8a89c; flex-shrink: 0; }
 
-.record-date {
-  font-size: 11px;
-  color: #c8a89c;
-  flex-shrink: 0;
-}
+// ---- 评分 ----
+.record-score { display: flex; align-items: center; gap: 4px; font-size: 13px; color: $color-warm-text; margin-bottom: 10px; flex-wrap: wrap; }
+.score-num { font-size: 16px; font-weight: 700; }
+.mood-badge { padding: 2px 10px; border-radius: 10px; color: $color-white; font-size: 12px; font-weight: 500; margin-left: 4px; }
 
-/* ---- 评分 ---- */
-.record-score {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: #8b7a74;
-  margin-bottom: 10px;
-  flex-wrap: wrap;
-}
-
-.score-num {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.mood-badge {
-  padding: 2px 10px;
-  border-radius: 10px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 500;
-  margin-left: 4px;
-}
-
-/* ---- 描述 ---- */
+// ---- 描述 ----
 .record-desc {
-  font-size: 13px;
-  color: #a0908a;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #f5e0dc;
-  line-height: 1.6;
-  overflow-wrap: break-word;
-  word-break: break-word;
+  font-size: 13px; color: #a0908a; margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid $color-warm-border; line-height: 1.6;
+  overflow-wrap: break-word; word-break: break-word;
 }
 
-/* ===== 响应式 ===== */
+// ===== 响应式 =====
 @media (max-width: 768px) {
-  .charts-row {
-    flex-direction: column;
-  }
-
-  .summary-cards {
-    gap: 10px;
-  }
-
-  .summary-card {
-    min-width: 0;
-    padding: 10px 8px;
-  }
-
-  .summary-num {
-    font-size: 18px;
-  }
-
-  .filter-left {
-    flex-direction: column;
-    width: 100%;
-  }
-
-  .filter-left > * {
-    width: 100%;
-  }
-
-  .chart-box {
-    height: 280px;
-  }
-
-  .chart-trend .chart-box {
-    height: 300px;
-  }
+  .charts-row { flex-direction: column; }
+  .summary-cards { gap: 10px; }
+  .summary-card { min-width: 0; padding: 10px 8px; }
+  .summary-num { font-size: 18px; }
+  .filter-left { flex-direction: column; width: 100%; > * { width: 100%; } }
+  .chart-box { height: 280px; }
+  .chart-trend .chart-box { height: 300px; }
+  .chart-pie { height: 220px; }
+  .virtual-list-container { height: 500px; }
+  .pie-legend-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
 }
 </style>

@@ -102,20 +102,20 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
   </div>
 </template>
 
-<style scoped>
-/* ===== 整体布局 ===== */
+<style lang="scss" scoped>
+// ===== 整体布局 =====
 .front-layout {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
+  background: $color-bg-page;
   overflow-x: hidden;
 }
 
-/* ===== 顶部导航 ===== */
+// ===== 顶部导航 =====
 .front-header {
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: $color-white;
+  box-shadow: $shadow-header;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -131,7 +131,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
   padding: 0 24px;
 }
 
-/* ---- 左侧 ---- */
+// ---- 左侧 ----
 .header-left {
   display: flex;
   align-items: center;
@@ -143,45 +143,43 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
   align-items: center;
   gap: 8px;
   text-decoration: none;
-  color: #333;
+  color: $color-text-dark;
 }
 
-.logo-icon {
-  font-size: 28px;
-}
+.logo-icon { font-size: 28px; }
 
 .logo-text {
   font-size: 20px;
   font-weight: 700;
-  color: #2c3e50;
+  color: $color-text-title;
 }
 
-/* ---- 桌面端导航 ---- */
+// ---- 桌面端导航 ----
 .header-nav {
   display: flex;
   gap: 8px;
+
+  a {
+    padding: 8px 16px;
+    color: $color-text-medium;
+    text-decoration: none;
+    font-size: 15px;
+    border-radius: $radius-md;
+    transition: all 0.2s;
+
+    &:hover {
+      color: $color-primary;
+      background: $color-primary-light-bg;
+    }
+
+    &.router-link-exact-active {
+      color: $color-primary;
+      font-weight: 600;
+    }
+  }
 }
 
-.header-nav a {
-  padding: 8px 16px;
-  color: #555;
-  text-decoration: none;
-  font-size: 15px;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-
-.header-nav a:hover {
-  color: #409eff;
-  background: #ecf5ff;
-}
-
-.header-nav a.router-link-exact-active {
-  color: #409eff;
-  font-weight: 600;
-}
-
-/* ---- 右侧 ---- */
+// ---- 右侧 ----
 .header-right {
   display: flex;
   align-items: center;
@@ -189,11 +187,11 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
 }
 
 .user-phone {
-  color: #666;
+  color: $color-text-muted;
   font-size: 14px;
 }
 
-/* ---- 移动端汉堡按钮 ---- */
+// ---- 移动端汉堡按钮 ----
 .hamburger-btn {
   display: none;
   flex-direction: column;
@@ -203,80 +201,70 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
   height: 36px;
   padding: 6px;
   border: none;
-  border-radius: 6px;
+  border-radius: $radius-md;
   background: transparent;
   cursor: pointer;
   transition: background 0.15s;
+
+  &:hover { background: $color-bg-hover-light; }
+
+  span {
+    display: block;
+    width: 100%;
+    height: 2px;
+    background: $color-text-medium;
+    border-radius: 1px;
+    transition: transform 0.25s, opacity 0.25s;
+
+    &.open:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    &.open:nth-child(2) { opacity: 0; }
+    &.open:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+  }
 }
 
-.hamburger-btn:hover {
-  background: #f5f5f5;
-}
-
-.hamburger-btn span {
-  display: block;
-  width: 100%;
-  height: 2px;
-  background: #555;
-  border-radius: 1px;
-  transition: transform 0.25s, opacity 0.25s;
-}
-
-.hamburger-btn span.open:nth-child(1) {
-  transform: translateY(7px) rotate(45deg);
-}
-
-.hamburger-btn span.open:nth-child(2) {
-  opacity: 0;
-}
-
-.hamburger-btn span.open:nth-child(3) {
-  transform: translateY(-7px) rotate(-45deg);
-}
-
-/* ---- 移动端下拉菜单 ---- */
+// ---- 移动端下拉菜单（绝对定位，不影响正文布局） ----
 .mobile-nav-dropdown {
-  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 99;
+  display: flex;
   flex-direction: column;
-  background: #fff;
-  border-top: 1px solid #ebeef5;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  background: $color-white;
+  border-top: 1px solid $color-border;
+  box-shadow: $shadow-dropdown;
   padding: 8px;
+
+  a {
+    padding: 12px 20px;
+    color: $color-text-medium;
+    text-decoration: none;
+    font-size: 15px;
+    border-radius: $radius-md;
+    transition: background 0.15s;
+
+    &:hover {
+      background: $color-bg-page;
+      color: $color-primary;
+    }
+
+    &.router-link-exact-active {
+      color: $color-primary;
+      font-weight: 600;
+      background: $color-primary-light-bg;
+    }
+  }
 }
 
-.mobile-nav-dropdown a {
-  padding: 12px 20px;
-  color: #555;
-  text-decoration: none;
-  font-size: 15px;
-  border-radius: 6px;
-  transition: background 0.15s;
-}
+// 下拉动画（Vue Transition 组件驱动）
+.slide-down-enter-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.slide-down-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 
-.mobile-nav-dropdown a:hover {
-  background: #f5f7fa;
-  color: #409eff;
-}
+.slide-down-enter-from { opacity: 0; transform: translateY(-12px); }
+.slide-down-leave-to   { opacity: 0; transform: translateY(-8px); }
 
-.mobile-nav-dropdown a.router-link-exact-active {
-  color: #409eff;
-  font-weight: 600;
-  background: #ecf5ff;
-}
-
-/* 下拉动画 */
-.slide-down-enter-active,
-.slide-down-leave-active {
-  transition: all 0.2s ease;
-}
-
-.slide-down-enter-from,
-.slide-down-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
-
-/* ===== 内容区 ===== */
+// ===== 内容区 =====
 .front-main {
   flex: 1;
   max-width: 1200px;
@@ -285,36 +273,21 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
   padding: 24px;
 }
 
-/* ===== 页脚 ===== */
+// ===== 页脚 =====
 .front-footer {
-  background: #fff;
+  background: $color-white;
   text-align: center;
   padding: 20px;
-  color: #999;
+  color: $color-text-light;
   font-size: 14px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid $color-border;
 }
 
-/* ===== 响应式：宽度 <= 768px 时桌面导航隐藏，显示汉堡菜单 ===== */
+// ===== 响应式 =====
 @media (max-width: 768px) {
-  .header-nav {
-    display: none;
-  }
-
-  .hamburger-btn {
-    display: flex;
-  }
-
-  .mobile-nav-dropdown {
-    display: flex;
-  }
-
-  .header-container {
-    padding: 0 16px;
-  }
-
-  .header-left {
-    gap: 16px;
-  }
+  .header-nav { display: none; }
+  .hamburger-btn { display: flex; }
+  .header-container { padding: 0 16px; }
+  .header-left { gap: 16px; }
 }
 </style>

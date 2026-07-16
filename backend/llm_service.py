@@ -27,7 +27,7 @@ load_dotenv()
 # ============================================================
 # 配置
 # ============================================================
-STREAM_DELAY = 0.02
+STREAM_DELAY = 0
 MAX_CONTEXT_MSGS = 12
 MCP_SERVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_web_search.py")
 
@@ -318,11 +318,18 @@ async def generate_stream(context: list[dict]):
     tool_events: list[dict] = []
 
     try:
-        # 检测是否需要搜索，通过 MCP 获取结果
+        # 检测是否需要搜索，通过 MCP 获取结果（流式：先展示状态 → 搜索 → 清除 → LLM 回复）
         last_user_msg = next((m["content"] for m in reversed(context) if m["role"] == "user"), "")
         if _should_search(last_user_msg) and "web_search" in TOOL_BY_NAME:
             matched = [kw for kw in _SEARCH_KEYWORDS if kw in last_user_msg]
             query = "心理健康 " + " ".join(matched[:3]) if matched else last_user_msg[:30]
+
+            # 立即展示搜索状态，消除等待空白
+            searching_msg = "🔍 正在搜索相关资料…"
+            full_text = searching_msg
+            sent_text = searching_msg
+            yield searching_msg
+
             try:
                 loop = asyncio.get_running_loop()
                 search_text = await loop.run_in_executor(
@@ -338,40 +345,85 @@ async def generate_stream(context: list[dict]):
                     ))
                     mcp_event["ok"] = True
                 tool_events.append(mcp_event)
+
+                # 清除搜索状态文字，准备 LLM 流式回复
+                yield "\x01correction\x01"
+                full_text = ""
+                sent_text = ""
+
                 yield f"\x01mcp\x01{json.dumps(mcp_event, ensure_ascii=False)}"
             except Exception as e:
                 print(f"[LLM] 搜索失败: {e}")
+                yield "\x01correction\x01"
+                full_text = ""
+                sent_text = ""
                 tool_events.append({"name": "web_search", "type": "mcp_auto", "query": query, "ok": False, "error": str(e)})
                 yield f"\x01mcp\x01{json.dumps({'name': 'web_search', 'type': 'mcp_auto', 'query': query, 'ok': False, 'error': str(e)}, ensure_ascii=False)}"
 
-        response = await LLM_WITH_TOOLS.ainvoke(lc_messages)
+        # ---- 全程 astream，消除首字延迟 ----
+        aggregated = None
+        async for chunk in LLM_WITH_TOOLS.astream(lc_messages):
+            if aggregated is None:
+                aggregated = chunk
+            else:
+                aggregated += chunk
 
-        tool_calls = getattr(response, "tool_calls", None)
+            if hasattr(chunk, "content") and chunk.content and isinstance(chunk.content, str):
+                full_text += chunk.content
+                new_part = full_text[len(sent_text):]
+                if new_part:
+                    sent_text = full_text
+                    await asyncio.sleep(STREAM_DELAY)
+                    yield new_part
+
+        # 检查聚合后的 tool_calls
+        tool_calls = getattr(aggregated, "tool_calls", None)
         if not tool_calls:
-            tool_calls = response.additional_kwargs.get("tool_calls", []) if hasattr(response, "additional_kwargs") else []
+            tool_calls = aggregated.additional_kwargs.get("tool_calls", []) if hasattr(aggregated, "additional_kwargs") else []
 
         if tool_calls:
+            # 若模型在工具调用前输出了文字，清掉
+            if full_text.strip():
+                yield "\x01correction\x01"
+                full_text = ""
+                sent_text = ""
+
             print(f"[LLM] 工具调用: {[tc.get('name', '?') for tc in tool_calls]}")
-            lc_messages.append(response)
+            lc_messages.append(aggregated)
             for tc in tool_calls:
                 tc_name = tc.get("name", "")
                 tc_args = tc.get("args", {})
                 tc_id = tc.get("id", "call_1")
 
-                # 通知前端：工具被调用
                 tc_event = {"name": tc_name, "type": "tool_call", "args": tc_args}
                 tool_events.append(tc_event)
                 yield f"\x01tool_call\x01{json.dumps(tc_event, ensure_ascii=False)}"
 
                 if tc_name in TOOL_BY_NAME:
+                    # MCP 工具：流式展示执行状态
+                    if tc_name == "web_search":
+                        status_msg = "🔍 正在搜索：{}…".format(str(tc_args.get("query", ""))[:40])
+                        full_text = status_msg
+                        sent_text = status_msg
+                        yield status_msg
+
                     try:
                         tool_result = TOOL_BY_NAME[tc_name].invoke(tc_args)
+                        if tc_name == "web_search":
+                            yield "\x01correction\x01"
+                            full_text = ""
+                            sent_text = ""
                         lc_messages.append(ToolMessage(content=str(tool_result), tool_call_id=tc_id))
                         yield f"\x01tool_result\x01{json.dumps({'name': tc_name, 'ok': True}, ensure_ascii=False)}"
                     except Exception as e:
+                        if tc_name == "web_search":
+                            yield "\x01correction\x01"
+                            full_text = ""
+                            sent_text = ""
                         lc_messages.append(ToolMessage(content=f"工具调用失败：{e}", tool_call_id=tc_id))
                         yield f"\x01tool_result\x01{json.dumps({'name': tc_name, 'ok': False, 'error': str(e)}, ensure_ascii=False)}"
 
+            # 工具结果后的第二次流式回复
             async for chunk in LLM_WITH_TOOLS.astream(lc_messages):
                 if hasattr(chunk, "content") and chunk.content:
                     if isinstance(chunk.content, str):
@@ -381,17 +433,6 @@ async def generate_stream(context: list[dict]):
                             sent_text = full_text
                             await asyncio.sleep(STREAM_DELAY)
                             yield new_part
-        else:
-            content = response.content if hasattr(response, "content") else ""
-            if isinstance(content, str) and content:
-                full_text = content
-                chunk_size = 15
-                pos = 0
-                while pos < len(content):
-                    end = min(pos + chunk_size, len(content))
-                    yield content[pos:end]
-                    pos = end
-                    await asyncio.sleep(STREAM_DELAY)
 
         final = _deduplicate(full_text)
         if len(final) < len(sent_text):

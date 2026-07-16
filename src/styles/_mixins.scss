@@ -1,0 +1,80 @@
+@use 'variables' as *;
+
+// Flex centering
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+// Flex column + center
+@mixin flex-col-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+// Text ellipsis
+@mixin text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Message bubble base
+@mixin msg-bubble-base {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+// Smooth transition
+@mixin transition-default($prop: all, $duration: 0.2s) {
+  transition: $prop $duration ease;
+}
+
+// Scrollable-y
+@mixin scrollable-y {
+  overflow-y: auto;
+}
+
+// Markdown content styles (shared by AI message bubbles)
+@mixin md-content {
+  :deep(h1),
+  :deep(h2),
+  :deep(h3) {
+    margin: 12px 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+    color: $color-text-title;
+  }
+  :deep(p) { margin: 4px 0; }
+  :deep(ul),
+  :deep(ol) {
+    margin: 6px 0;
+    padding-left: 20px;
+  }
+  :deep(li) { margin: 2px 0; line-height: 1.6; }
+  :deep(strong) { color: $color-text-title; font-weight: 600; }
+  :deep(hr) {
+    border: none;
+    border-top: 1px solid $color-border;
+    margin: 12px 0;
+  }
+  :deep(code) {
+    background: $color-bg-code;
+    padding: 1px 6px;
+    border-radius: $radius-sm;
+    font-size: 13px;
+  }
+  :deep(blockquote) {
+    border-left: 3px solid $color-primary;
+    margin: 8px 0;
+    padding: 4px 12px;
+    color: $color-text-regular;
+    background: #f8fbff;
+    border-radius: 0 6px 6px 0;
+  }
+}

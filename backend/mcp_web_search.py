@@ -1,8 +1,8 @@
 """
 MCP Web Search Server —— 互联网搜索工具
 
-通过 DuckDuckGo HTML 搜索实现无需 API Key 的网页搜索。
-支持中文搜索，返回标题、摘要和链接。
+多引擎回退：百度 → 搜狗 → 360搜索
+全部使用国内搜索引擎，针对中文心理健康内容优化。
 
 启动方式:
     python mcp_web_search.py
@@ -10,6 +10,7 @@ MCP Web Search Server —— 互联网搜索工具
 
 import sys
 import os
+import gzip
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -27,7 +28,7 @@ server = Server("web-search-tools")
 TOOLS = [
     types.Tool(
         name="web_search",
-        description="搜索互联网信息。当用户询问需要实时信息的心理健康问题时使用此工具查找相关资料。支持中文和英文搜索。返回网页标题、摘要和链接。",
+        description="搜索互联网信息。优先使用百度搜索中文内容。当用户询问需要实时信息的心理健康问题时使用此工具查找相关资料。支持中文和英文搜索。返回网页标题、摘要和链接。",
         inputSchema={
             "type": "object",
             "properties": {
@@ -48,64 +49,234 @@ TOOLS = [
     ),
 ]
 
-_DDG_URL = "https://html.duckduckgo.com/html/"
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.5",
+}
 
+# ============================================================
+# 引擎 1：百度
+# ============================================================
 
-def _parse_ddg_html(html: str) -> list[dict]:
-    """解析 DuckDuckGo HTML 搜索结果"""
-    results = []
-    # 匹配每个搜索结果块
-    blocks = re.split(r'<div class="result results_links', html)
-    for block in blocks[1:]:  # 跳过第一个分割前的内容
-        title_match = re.search(r'<a[^>]*class="result__a"[^>]*>(.*?)</a>', block, re.DOTALL)
-        snippet_match = re.search(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', block, re.DOTALL)
-        url_match = re.search(r'<a[^>]*class="result__url"[^>]*>(.*?)</a>', block, re.DOTALL)
-
-        title = unescape(re.sub(r'<[^>]*>', '', title_match.group(1))).strip() if title_match else ""
-        snippet = unescape(re.sub(r'<[^>]*>', '', snippet_match.group(1))).strip() if snippet_match else ""
-        url_raw = unescape(re.sub(r'<[^>]*>', '', url_match.group(1))).strip() if url_match else ""
-
-        if title and snippet:
-            results.append({"title": title, "snippet": snippet, "url": url_raw})
-    return results
-
-
-def web_search(query: str, max_results: int = 5) -> str:
-    """执行 DuckDuckGo 网页搜索"""
-    max_results = max(1, min(max_results, 8))
-
+def _search_baidu(query: str, max_results: int) -> str | None:
+    """百度网页搜索，失败返回 None"""
     try:
-        params = urllib.parse.urlencode({"q": query}).encode("utf-8")
+        params = urllib.parse.urlencode({"wd": query, "rn": max_results})
         req = urllib.request.Request(
-            _DDG_URL,
-            data=params,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+            f"https://www.baidu.com/s?{params}",
+            headers=_HEADERS,
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read()
+            if resp.headers.get("Content-Encoding") == "gzip":
+                raw = gzip.decompress(raw)
+            html = raw.decode("utf-8", errors="replace")
 
-        results = _parse_ddg_html(html)[:max_results]
-
+        results = _parse_baidu(html, max_results)
         if not results:
-            return f"未找到关于「{query}」的搜索结果。请尝试其他关键词。"
+            return None
 
-        lines = [f"关于「{query}」的搜索结果：\n"]
+        lines = [f"百度搜索「{query}」的结果：\n"]
         for i, r in enumerate(results, 1):
             lines.append(f"{i}. **{r['title']}**")
             lines.append(f"   {r['snippet']}")
-            if r['url']:
+            if r.get("url"):
                 lines.append(f"   {r['url']}")
             lines.append("")
-
         return "\n".join(lines)
 
-    except urllib.error.URLError:
-        return f"搜索「{query}」时网络连接失败，请检查网络后重试。"
     except Exception as e:
-        return f"搜索时发生错误：{str(e)}"
+        print(f"[MCP] 百度搜索失败: {e}")
+        return None
+
+
+def _parse_baidu(html: str, max_results: int) -> list[dict]:
+    """解析百度 PC 版搜索结果"""
+    results = []
+    # 匹配每个结果块：<div class="result c-container" ...> 到对应的闭合 </div>
+    # 百度 HTML 嵌套很深，用宽松匹配
+    blocks = re.findall(
+        r'<div[^>]*class="[^"]*result c-container[^"]*".*?</div>\s*</div>\s*</div>\s*</div>',
+        html, re.DOTALL,
+    )
+    if not blocks:
+        # 回退：按 class="result" 切分
+        parts = html.split('class="result')
+        blocks = ['class="result' + p for p in parts[1:]]
+
+    for block in blocks[:max_results * 2]:
+        # 标题：<h3> 内 <a> 的文本
+        title_match = re.search(r'<h3[^>]*>.*?<a[^>]*>(.*?)</a>', block, re.DOTALL)
+        # 摘要
+        snippet_match = re.search(
+            r'<span[^>]*class="[^"]*content-right_[^"]*"[^>]*>(.*?)</span>',
+            block, re.DOTALL,
+        )
+        if not snippet_match:
+            snippet_match = re.search(
+                r'<span[^>]*class="[^"]*c-abstract[^"]*"[^>]*>(.*?)</span>',
+                block, re.DOTALL,
+            )
+        if not snippet_match:
+            snippet_match = re.search(
+                r'<div[^>]*class="[^"]*c-abstract[^"]*"[^>]*>(.*?)</div>',
+                block, re.DOTALL,
+            )
+        # 链接
+        url_match = re.search(r'<a[^>]*href="(https?://[^"]+)"[^>]*>', block)
+
+        title = unescape(re.sub(r'<[^>]*>', '', title_match.group(1))).strip() if title_match else ""
+        snippet = unescape(re.sub(r'<[^>]*>', '', snippet_match.group(1))).strip() if snippet_match else ""
+
+        if title and len(results) < max_results:
+            results.append({"title": title, "snippet": snippet, "url": url_match.group(1) if url_match else ""})
+
+    return results
+
+
+# ============================================================
+# 引擎 2：搜狗
+# ============================================================
+
+def _search_sogou(query: str, max_results: int) -> str | None:
+    """搜狗网页搜索，失败返回 None"""
+    try:
+        params = urllib.parse.urlencode({"query": query})
+        req = urllib.request.Request(
+            f"https://www.sogou.com/web?{params}",
+            headers=_HEADERS,
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read()
+            if resp.headers.get("Content-Encoding") == "gzip":
+                raw = gzip.decompress(raw)
+            html = raw.decode("utf-8", errors="replace")
+
+        results = _parse_sogou(html, max_results)
+        if not results:
+            return None
+
+        lines = [f"搜狗搜索「{query}」的结果：\n"]
+        for i, r in enumerate(results, 1):
+            lines.append(f"{i}. **{r['title']}**")
+            lines.append(f"   {r['snippet']}")
+            if r.get("url"):
+                lines.append(f"   {r['url']}")
+            lines.append("")
+        return "\n".join(lines)
+
+    except Exception as e:
+        print(f"[MCP] 搜狗搜索失败: {e}")
+        return None
+
+
+def _parse_sogou(html: str, max_results: int) -> list[dict]:
+    """解析搜狗搜索结果"""
+    results = []
+    # 搜狗结果块：<div class="vrwrap"> ... </div>
+    blocks = re.findall(r'<div[^>]*class="[^"]*vrwrap[^"]*"[^>]*>(.*?)</div>\s*</div>\s*</div>', html, re.DOTALL)
+    if not blocks:
+        # 回退：<div class="rb">
+        blocks = re.findall(r'<div[^>]*class="[^"]*rb[^"]*"[^>]*>(.*?)</div>\s*</div>', html, re.DOTALL)
+
+    for block in blocks[:max_results]:
+        title_match = re.search(r'<h3[^>]*>.*?<a[^>]*>(.*?)</a>', block, re.DOTALL)
+        snippet_match = re.search(r'<p[^>]*class="[^"]*star-last-str[^"]*"[^>]*>(.*?)</p>', block, re.DOTALL)
+        if not snippet_match:
+            snippet_match = re.search(r'<div[^>]*class="[^"]*space-txt[^"]*"[^>]*>(.*?)</div>', block, re.DOTALL)
+        if not snippet_match:
+            snippet_match = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL)
+        url_match = re.search(r'<a[^>]*href="(https?://[^"]+)"[^>]*>', block)
+
+        title = unescape(re.sub(r'<[^>]*>', '', title_match.group(1))).strip() if title_match else ""
+        snippet = unescape(re.sub(r'<[^>]*>', '', snippet_match.group(1))).strip() if snippet_match else ""
+
+        if title and len(results) < max_results:
+            results.append({"title": title, "snippet": snippet, "url": url_match.group(1) if url_match else ""})
+
+    return results
+
+
+# ============================================================
+# 引擎 3：360搜索
+# ============================================================
+
+def _search_360(query: str, max_results: int) -> str | None:
+    """360搜索，失败返回 None"""
+    try:
+        params = urllib.parse.urlencode({"q": query})
+        req = urllib.request.Request(
+            f"https://www.so.com/s?{params}",
+            headers=_HEADERS,
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read()
+            if resp.headers.get("Content-Encoding") == "gzip":
+                raw = gzip.decompress(raw)
+            html = raw.decode("utf-8", errors="replace")
+
+        results = _parse_360(html, max_results)
+        if not results:
+            return None
+
+        lines = [f"360搜索「{query}」的结果：\n"]
+        for i, r in enumerate(results, 1):
+            lines.append(f"{i}. **{r['title']}**")
+            lines.append(f"   {r['snippet']}")
+            if r.get("url"):
+                lines.append(f"   {r['url']}")
+            lines.append("")
+        return "\n".join(lines)
+
+    except Exception as e:
+        print(f"[MCP] 360搜索失败: {e}")
+        return None
+
+
+def _parse_360(html: str, max_results: int) -> list[dict]:
+    """解析360搜索结果"""
+    results = []
+    # 360结果块：<li class="res-list"> ... </li>
+    blocks = re.findall(r'<li[^>]*class="[^"]*res-list[^"]*"[^>]*>(.*?)</li>', html, re.DOTALL)
+
+    for block in blocks[:max_results]:
+        title_match = re.search(r'<h3[^>]*>.*?<a[^>]*>(.*?)</a>', block, re.DOTALL)
+        snippet_match = re.search(r'<p[^>]*class="[^"]*res-desc[^"]*"[^>]*>(.*?)</p>', block, re.DOTALL)
+        if not snippet_match:
+            snippet_match = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL)
+        url_match = re.search(r'<a[^>]*href="(https?://[^"]+)"[^>]*>', block)
+
+        title = unescape(re.sub(r'<[^>]*>', '', title_match.group(1))).strip() if title_match else ""
+        snippet = unescape(re.sub(r'<[^>]*>', '', snippet_match.group(1))).strip() if snippet_match else ""
+
+        if title and len(results) < max_results:
+            results.append({"title": title, "snippet": snippet, "url": url_match.group(1) if url_match else ""})
+
+    return results
+
+
+# ============================================================
+# 统一入口：百度 → 搜狗 → 360搜索 回退
+# ============================================================
+
+def web_search(query: str, max_results: int = 5) -> str:
+    """多引擎搜索：百度 → 必应 → DuckDuckGo 逐级回退"""
+    max_results = max(1, min(max_results, 8))
+
+    engines = [
+        ("百度", _search_baidu),
+        ("搜狗", _search_sogou),
+        ("360搜索", _search_360),
+    ]
+
+    for name, engine_fn in engines:
+        result = engine_fn(query, max_results)
+        if result:
+            return result
+        print(f"[MCP] {name}无结果，尝试下一个引擎…")
+
+    return f"未找到关于「{query}」的搜索结果。请尝试其他关键词。"
 
 
 TOOL_REGISTRY = {"web_search": web_search}

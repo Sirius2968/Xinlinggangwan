@@ -13,6 +13,7 @@ const userStore = useUserStore()
 const showFavoritesOnly = ref(false)
 const sharedArticles = ref([])
 const sharedFavIds = ref(new Set())  // 当前用户已收藏的社区文章 ID（按账号隔离）
+const sharedDetail = ref(null)       // 当前查看的社区文章详情
 
 // 本地防抖搜索（250ms），避免每次按键触发 Pinia computed 重算
 const localSearchQuery = ref(store.searchQuery)
@@ -90,7 +91,10 @@ async function handleSharedFavorite(article) {
   } catch { /* ignore */ }
 }
 
-onMounted(() => loadSharedArticles())
+onMounted(() => {
+  store.loadArticles()
+  loadSharedArticles()
+})
 </script>
 
 <template>
@@ -187,7 +191,8 @@ onMounted(() => loadSharedArticles())
         <router-link to="/article-share" class="shared-more">查看更多 &rarr;</router-link>
       </div>
       <div class="shared-grid">
-        <div v-for="article in sharedArticles.slice(0, 6)" :key="article.id" class="shared-card">
+        <div v-for="article in sharedArticles.slice(0, 6)" :key="article.id" class="shared-card"
+             @click="sharedDetail = article">
           <div class="shared-top">
             <h4>{{ article.title }}</h4>
             <div class="shared-tags" v-if="article.tags">
@@ -201,7 +206,7 @@ onMounted(() => loadSharedArticles())
             <button
               class="shared-fav"
               :class="{ active: isSharedFavorited(article.id) }"
-              @click="handleSharedFavorite(article)"
+              @click.stop="handleSharedFavorite(article)"
             >
               &#x2764; {{ article.favorite_count || 0 }}
             </button>
@@ -210,7 +215,29 @@ onMounted(() => loadSharedArticles())
       </div>
     </div>
 
-    <!-- 文章详情弹窗 -->
+    <!-- 社区文章详情弹窗 -->
+    <BaseDialog
+      :model-value="!!sharedDetail"
+      :title="sharedDetail?.title || ''"
+      width="680px"
+      :show-footer="false"
+      @close="sharedDetail = null"
+    >
+      <template v-if="sharedDetail">
+        <div class="article-detail">
+          <div class="detail-meta">
+            <span class="detail-author">&#x1f464; {{ sharedDetail.author }}</span>
+            <span class="detail-date">{{ sharedDetail.created_at?.slice(0, 10) || '' }}</span>
+            <div class="detail-tags-inline" v-if="sharedDetail.tags">
+              <span v-for="tag in sharedDetail.tags.split(',').filter(Boolean)" :key="tag" class="stag">{{ tag.trim() }}</span>
+            </div>
+          </div>
+          <div class="detail-content">{{ sharedDetail.content }}</div>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <!-- 内置文章详情弹窗 -->
     <BaseDialog
       :model-value="!!store.selectedArticle"
       :title="store.selectedArticle?.title || ''"
@@ -258,169 +285,174 @@ onMounted(() => loadSharedArticles())
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
 .articles-page { max-width: 1100px; margin: 0 auto; }
 
-/* ===== 头部 ===== */
-.page-header { text-align: center; padding: 40px 0 24px; }
-.page-header h1 { font-size: 30px; font-weight: 700; color: #2c3e50; margin-bottom: 8px; }
-.page-header p { color: #909399; font-size: 15px; }
-
-/* ===== 搜索栏 ===== */
-.toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.search-wrap { flex: 1; position: relative; display: flex; align-items: center; }
-.search-icon { position: absolute; left: 14px; font-size: 16px; pointer-events: none; }
-.search-input {
-  width: 100%; padding: 10px 40px 10px 40px;
-  border: 1px solid #dcdfe6; border-radius: 10px; font-size: 14px;
-  outline: none; transition: border-color 0.25s, box-shadow 0.25s;
+// ===== 头部 =====
+.page-header {
+  text-align: center; padding: 40px 0 24px;
+  h1 { font-size: 30px; font-weight: 700; color: $color-text-title; margin-bottom: 8px; }
+  p { color: $color-text-secondary; font-size: 15px; }
 }
-.search-input:focus { border-color: #409eff; box-shadow: 0 0 0 3px rgba(64,158,255,0.12); }
+
+// ===== 搜索栏 =====
+.toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+
+.search-wrap { flex: 1; position: relative; display: flex; align-items: center; }
+
+.search-icon { position: absolute; left: 14px; font-size: 16px; pointer-events: none; }
+
+.search-input {
+  width: 100%; padding: 10px 40px; border: 1px solid #dcdfe6; border-radius: 10px;
+  font-size: $font-size-base; outline: none; transition: border-color 0.25s, box-shadow 0.25s;
+  &:focus { border-color: $color-primary; box-shadow: 0 0 0 3px rgba(64,158,255,0.12); }
+}
+
 .search-clear {
   position: absolute; right: 10px; border: none; background: none;
-  font-size: 18px; cursor: pointer; color: #c0c4cc; padding: 0 4px; line-height: 1;
+  font-size: 18px; cursor: pointer; color: $color-text-placeholder; padding: 0 4px; line-height: 1;
+  &:hover { color: $color-text-secondary; }
 }
-.search-clear:hover { color: #909399; }
+
 .favorite-toggle {
   flex-shrink: 0; padding: 10px 18px; border: 1px solid #dcdfe6; border-radius: 10px;
-  background: #fff; font-size: 14px; cursor: pointer; color: #606266;
+  background: $color-white; font-size: $font-size-base; cursor: pointer; color: $color-text-regular;
   transition: all 0.25s; white-space: nowrap;
+  &:hover { border-color: $color-danger; color: $color-danger; }
+  &.active { background: $color-danger-bg; border-color: $color-danger; color: $color-danger; font-weight: 600; }
 }
-.favorite-toggle:hover { border-color: #f56c6c; color: #f56c6c; }
-.favorite-toggle.active { background: #fef0f0; border-color: #f56c6c; color: #f56c6c; font-weight: 600; }
 
-/* ===== 分类标签 ===== */
+// ===== 分类标签 =====
 .category-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
-.cat-tab {
-  padding: 8px 18px; border: 1px solid #ebeef5; border-radius: 20px;
-  background: #fff; font-size: 14px; color: #606266; cursor: pointer; transition: all 0.25s;
-}
-.cat-tab:hover { border-color: #409eff; color: #409eff; }
-.cat-tab.active { background: #409eff; color: #fff; border-color: #409eff; font-weight: 600; }
 
-/* ===== 文章网格 ===== */
+.cat-tab {
+  padding: 8px 18px; border: 1px solid $color-border; border-radius: $radius-round;
+  background: $color-white; font-size: $font-size-base; color: $color-text-regular;
+  cursor: pointer; transition: all 0.25s;
+  &:hover { border-color: $color-primary; color: $color-primary; }
+  &.active { background: $color-primary; color: $color-white; border-color: $color-primary; font-weight: 600; }
+}
+
+// ===== 文章网格 =====
 .articles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+
 .article-card {
-  background: #fff; border-radius: 14px; padding: 24px;
-  border: 1px solid #ebeef5; cursor: pointer; position: relative;
+  background: $color-white; border-radius: 14px; padding: 24px;
+  border: 1px solid $color-border; cursor: pointer; position: relative;
   display: flex; gap: 16px;
   transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease, border-color 0.3s ease;
+  &:hover { transform: translateY(-4px); box-shadow: 0 8px 28px rgba(0,0,0,0.1); border-color: rgba(64,158,255,0.25); }
+  h3 { font-size: 16px; color: $color-text-primary; margin-bottom: 8px; line-height: 1.4; }
+  p {
+    font-size: 13px; color: $color-text-secondary; line-height: 1.6; margin-bottom: 12px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
 }
-.article-card:hover { transform: translateY(-4px); box-shadow: 0 8px 28px rgba(0,0,0,0.1); border-color: rgba(64,158,255,0.25); }
-.card-icon { font-size: 32px; flex-shrink: 0; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: #f5f7fa; border-radius: 12px; }
+
+.card-icon { font-size: 32px; flex-shrink: 0; width: 48px; height: 48px; @include flex-center; background: $color-bg-page; border-radius: 12px; }
 .card-body { flex: 1; min-width: 0; }
 .card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.card-category { font-size: 12px; color: #409eff; background: #ecf5ff; padding: 2px 10px; border-radius: 10px; }
-.card-time { font-size: 12px; color: #c0c4cc; }
-.article-card h3 { font-size: 16px; color: #303133; margin-bottom: 8px; line-height: 1.4; }
-.article-card p {
-  font-size: 13px; color: #909399; line-height: 1.6; margin-bottom: 12px;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
+.card-category { font-size: 12px; color: $color-primary; background: $color-primary-light-bg; padding: 2px 10px; border-radius: 10px; }
+.card-time { font-size: 12px; color: $color-text-placeholder; }
 .card-tags { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 28px; }
-.tag { padding: 2px 8px; border-radius: 8px; font-size: 11px; background: #f5f7fa; color: #909399; }
+.tag { padding: 2px 8px; border-radius: 8px; font-size: 11px; background: $color-bg-page; color: $color-text-secondary; }
 
-/* 收藏按钮 — 右下角 */
+// 收藏按钮 — 右下角
 .favorite-card-btn {
   position: absolute; bottom: 16px; right: 16px;
-  border: 1px solid #ebeef5; border-radius: 8px;
-  background: #fff; font-size: 13px; cursor: pointer;
-  padding: 4px 12px; color: #c0c4cc;
+  border: 1px solid $color-border; border-radius: 8px;
+  background: $color-white; font-size: 13px; cursor: pointer;
+  padding: 4px 12px; color: $color-text-placeholder;
   transition: all 0.2s;
+  &:hover { border-color: $color-danger; color: $color-danger; transform: scale(1.05); }
+  &.favorited { border-color: $color-danger; color: $color-danger; background: $color-danger-bg; }
 }
-.favorite-card-btn:hover { border-color: #f56c6c; color: #f56c6c; transform: scale(1.05); }
-.favorite-card-btn.favorited { border-color: #f56c6c; color: #f56c6c; background: #fef0f0; }
 
-/* ===== 空状态 ===== */
-.empty-state { text-align: center; padding: 60px 20px; color: #909399; }
+// ===== 空状态 =====
+.empty-state { text-align: center; padding: 60px 20px; color: $color-text-secondary; }
 .empty-icon { font-size: 48px; margin-bottom: 16px; }
 .empty-state p { font-size: 15px; margin-bottom: 16px; }
 .empty-action {
-  padding: 10px 24px; border: 1px solid #409eff; border-radius: 20px;
-  background: #fff; color: #409eff; font-size: 14px; cursor: pointer; transition: all 0.25s;
+  padding: 10px 24px; border: 1px solid $color-primary; border-radius: $radius-round;
+  background: $color-white; color: $color-primary; font-size: $font-size-base;
+  cursor: pointer; transition: all 0.25s;
+  &:hover { background: $color-primary-light-bg; }
 }
-.empty-action:hover { background: #ecf5ff; }
 
-/* ===== 文章详情弹窗 ===== */
+// ===== 文章详情弹窗（内置 & 社区共用） =====
 .article-detail { text-align: left; }
-.detail-meta { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #ebeef5; }
-.detail-category { font-size: 13px; color: #409eff; background: #ecf5ff; padding: 3px 12px; border-radius: 10px; }
-.detail-time { font-size: 13px; color: #c0c4cc; }
+.detail-meta { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid $color-border; flex-wrap: wrap; }
+.detail-category { font-size: 13px; color: $color-primary; background: $color-primary-light-bg; padding: 3px 12px; border-radius: 10px; }
+.detail-time { font-size: 13px; color: $color-text-placeholder; }
+.detail-author { font-size: 13px; color: $color-text-regular; font-weight: 500; }
+.detail-date { font-size: 13px; color: $color-text-placeholder; }
+.detail-tags-inline { display: flex; gap: 4px; flex-wrap: wrap; }
+.stag {
+  padding: 1px 8px; border-radius: 8px; font-size: 11px;
+  background: #f0f9eb; color: $color-success;
+}
 .detail-fav {
   margin-left: auto; border: 1px solid #dcdfe6; border-radius: 8px;
-  background: #fff; font-size: 13px; cursor: pointer; padding: 4px 12px;
-  color: #909399; transition: all 0.2s;
+  background: $color-white; font-size: 13px; cursor: pointer; padding: 4px 12px;
+  color: $color-text-secondary; transition: all 0.2s;
+  &:hover { border-color: $color-danger; color: $color-danger; }
+  &.favorited { background: $color-danger-bg; border-color: $color-danger; color: $color-danger; }
 }
-.detail-fav:hover { border-color: #f56c6c; color: #f56c6c; }
-.detail-fav.favorited { background: #fef0f0; border-color: #f56c6c; color: #f56c6c; }
-.detail-content { font-size: 14px; color: #606266; line-height: 1.9; white-space: pre-line; margin-bottom: 20px; }
+.detail-content { font-size: $font-size-base; color: $color-text-regular; line-height: 1.9; white-space: pre-line; margin-bottom: 20px; }
 .detail-tags { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
-.related-section { border-top: 1px solid #ebeef5; padding-top: 20px; }
-.related-section h4 { font-size: 15px; color: #303133; margin-bottom: 12px; }
+
+.related-section {
+  border-top: 1px solid $color-border; padding-top: 20px;
+  h4 { font-size: 15px; color: $color-text-primary; margin-bottom: 12px; }
+}
 .related-list { display: flex; flex-direction: column; gap: 10px; }
 .related-item {
   display: flex; align-items: center; gap: 12px; padding: 12px;
-  border-radius: 10px; border: 1px solid #ebeef5; cursor: pointer; transition: all 0.2s;
+  border-radius: 10px; border: 1px solid $color-border; cursor: pointer; transition: all 0.2s;
+  &:hover { background: #f8fbff; border-color: #c6e2ff; }
+  strong { display: block; font-size: 14px; color: $color-text-primary; margin-bottom: 2px; }
+  p { font-size: 12px; color: $color-text-placeholder; margin: 0; }
 }
-.related-item:hover { background: #f8fbff; border-color: #c6e2ff; }
 .related-icon { font-size: 24px; flex-shrink: 0; }
-.related-item strong { display: block; font-size: 14px; color: #303133; margin-bottom: 2px; }
-.related-item p { font-size: 12px; color: #c0c4cc; margin: 0; }
 
-/* ===== 社区分享文章 ===== */
+// ===== 社区分享文章 =====
 .shared-section {
-  margin-top: 48px; padding-top: 32px;
-  border-top: 2px solid #ebeef5;
+  margin-top: 48px; padding-top: 32px; border-top: 2px solid $color-border;
 }
 .shared-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 20px;
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;
+  h2 { font-size: 22px; color: $color-text-title; }
 }
-.shared-header h2 { font-size: 22px; color: #2c3e50; }
-.shared-more { font-size: 14px; color: #409eff; text-decoration: none; }
-.shared-more:hover { text-decoration: underline; }
-.shared-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
-}
+.shared-more { font-size: $font-size-base; color: $color-primary; text-decoration: none; &:hover { text-decoration: underline; } }
+.shared-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 .shared-card {
-  background: #fff; border: 1px solid #ebeef5; border-radius: 12px;
-  padding: 18px; transition: box-shadow 0.3s ease;
+  background: $color-white; border: 1px solid $color-border; border-radius: 12px;
+  padding: 18px; cursor: pointer;
+  transition: box-shadow 0.3s ease;
+  &:hover { box-shadow: 0 4px 18px rgba(0,0,0,0.07); }
+  p { font-size: 13px; color: $color-text-secondary; line-height: 1.6; margin-bottom: 12px; }
 }
-.shared-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,0.07); }
 .shared-top { margin-bottom: 8px; }
-.shared-top h4 { font-size: 15px; color: #303133; margin-bottom: 6px; }
+.shared-top h4 { font-size: 15px; color: $color-text-primary; margin-bottom: 6px; }
 .shared-tags { display: flex; gap: 4px; flex-wrap: wrap; }
-.stag {
-  padding: 1px 8px; border-radius: 8px; font-size: 11px;
-  background: #f0f9eb; color: #67c23a;
-}
-.shared-card p {
-  font-size: 13px; color: #909399; line-height: 1.6; margin-bottom: 12px;
-}
-.shared-bottom {
-  display: flex; align-items: center; gap: 12px;
-  font-size: 12px; color: #c0c4cc;
-}
-.shared-author { color: #606266; }
+.stag { padding: 1px 8px; border-radius: 8px; font-size: 11px; background: #f0f9eb; color: $color-success; }
+.shared-bottom { display: flex; align-items: center; gap: 12px; font-size: 12px; color: $color-text-placeholder; }
+.shared-author { color: $color-text-regular; }
 .shared-date { flex: 1; }
 .shared-fav {
-  border: 1px solid #fde2e2; border-radius: 6px;
-  background: #fff; font-size: 12px; cursor: pointer;
-  padding: 2px 10px; color: #f56c6c; transition: all 0.2s;
+  border: 1px solid #fde2e2; border-radius: $radius-md;
+  background: $color-white; font-size: 12px; cursor: pointer;
+  padding: 2px 10px; color: $color-danger; transition: all 0.2s;
+  &:hover { background: $color-danger-bg; }
+  &.active { background: $color-danger-bg; border-color: $color-danger; }
 }
-.shared-fav:hover { background: #fef0f0; }
-.shared-fav.active { background: #fef0f0; border-color: #f56c6c; }
 
-/* ===== 响应式 ===== */
+// ===== 响应式 =====
 @media (max-width: 768px) {
   .articles-grid { grid-template-columns: 1fr; }
-  .page-header { padding: 20px 0 16px; }
-  .page-header h1 { font-size: 24px; }
+  .page-header { padding: 20px 0 16px; h1 { font-size: 24px; } }
   .toolbar { flex-direction: column; }
   .favorite-toggle { width: 100%; text-align: center; }
   .shared-grid { grid-template-columns: 1fr; }
 }
-
 </style>
